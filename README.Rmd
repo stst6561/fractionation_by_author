@@ -457,4 +457,9 @@ In Scopus liegt die Rate von *pk_items* mit ungenügender Zuordnung dagegen seit
 
 Eine Nutzung der WoS für Fraktionierungszwecke erscheint daher nur für den aktuellen Rand angebracht, während Scopus Daten auch für die Vergangenheit ein ausreichendes Niveau aufweisen sollten.
 
+```{r teardown, include=FALSE}
+dbDisconnect(OraConn)
+```
+
+
 # Literatur
