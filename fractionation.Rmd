@@ -2,7 +2,7 @@
 title: "Fraktionierung auf Autorenebene"
 author: "Stephan Stahlschmidt"
 date: "24 Februar 2017"
-output: pdf_document
+output: github_document
 bibliography: MeineBibliothek.bib
 csl: emerald-harvard.csl
 ---
@@ -143,7 +143,6 @@ paperNullInstitution <- dbGetQuery(OraConn, strwrap(paste0("
     AND pubtype = 'J'
     AND doctype IN ('@ Article', 'R Review')
     AND pubyear BETWEEN 2005 AND 2014
-    AND type = 'RS'
   GROUP BY pubyear
   ORDER BY pubyear ASC
   "),
