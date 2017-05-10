@@ -1,12 +1,12 @@
 Fraktionierung auf Autorenebene
 ================
 Stephan Stahlschmidt
-24 Februar 2017
+10 Mai, 2017
 
 Sachverhalt
 ===========
 
-Waltman and Eck (2015) zeigen auf das full counting nicht kompatibel mit Feld-Normalisierung ist. Sie schlagen vor eine fractional counting auf Ebene der Autoren durchzuführen.
+Waltman and Eck (2015) zeigen auf das full counting nicht kompatibel mit Feld-Normalisierung ist. Sie schlagen vor ein fractional counting auf Ebene der Autoren durchzuführen.
 
 Hierbei entstehen zwei Schwierigkeiten:
 
@@ -60,122 +60,39 @@ Probleme
 
 Die für die Fraktionierung benötigten Felder *fk\_authors*, *type* und *fk\_institutions* sind nicht immer gut gepflegt.
 
-*Article* und *Review* pro Jahr:
+Prozentualer Anteil von pk\_items mit NULL im fk\_authors oder fk\_institutions, i.e. fehlende Zuordnung zwischen author und institution:
 
-``` sql
-SELECT pubyear, COUNT(DISTINCT fk_items)
-FROM wos12b.items it
-JOIN wos12b.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
-WHERE datasource = 'WOSCI'
-  AND pubtype = 'J'
-  AND doctype IN ('@ Article', 'R Review')
-  AND pubyear BETWEEN 2005 AND 2014
-  AND type = 'RS'
-GROUP BY pubyear
-ORDER BY pubyear ASC
-```
+|      |  affilation w/o authors|  author w/o affilation|
+|------|-----------------------:|----------------------:|
+| 2005 |                    99.3|                   90.6|
+| 2006 |                    99.2|                   90.6|
+| 2007 |                    89.4|                   82.2|
+| 2008 |                    25.9|                   23.3|
+| 2009 |                    12.0|                   11.3|
+| 2010 |                    11.3|                   10.6|
+| 2011 |                    10.5|                    9.7|
+| 2012 |                     9.9|                    9.5|
+| 2013 |                     8.9|                    5.8|
+| 2014 |                     8.3|                    4.5|
 
-*Article* und *Review* mit *fk\_authors* als NULL:
+![](README_files/figure-markdown_github/tab_friction-1.png)
 
-``` sql
-SELECT pubyear, COUNT(DISTINCT fk_items)
-FROM wos12b.items it
-JOIN wos12b.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
-WHERE fk_authors IS NULL
-  AND datasource = 'WOSCI'
-  AND pubtype = 'J'
-  AND doctype IN ('@ Article', 'R Review')
-  AND pubyear BETWEEN 2005 AND 2014
-  AND type = 'RS'
-GROUP BY pubyear
-ORDER BY pubyear ASC
-```
+Prozentualer Anteil von pk\_items mit Unterschieden in author\_cnt, bzw. inst\_cnt und Zählung der zugehörigen fk\_authors, bzw. fk\_institutions:
 
-*Article* und *Review* mit *fk\_institutions* als NULL:
+|      |  Anzahl Autoren != author\_cnt|  Anzahl Affiliation != inst\_cnt|
+|------|------------------------------:|--------------------------------:|
+| 2005 |                           99.4|                             24.9|
+| 2006 |                           99.3|                             25.5|
+| 2007 |                           90.1|                             25.5|
+| 2008 |                           30.6|                             26.3|
+| 2009 |                           18.4|                             27.1|
+| 2010 |                           17.6|                             28.3|
+| 2011 |                           16.4|                             29.1|
+| 2012 |                           15.7|                             30.2|
+| 2013 |                           11.2|                             32.1|
+| 2014 |                            9.7|                             32.7|
 
-``` sql
-SELECT pubyear, COUNT(DISTINCT fk_items)
-FROM wos12b.items it
-JOIN wos12b.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
-WHERE fk_institutions IS NULL
-  AND datasource = 'WOSCI'
-  AND pubtype = 'J'
-  AND doctype IN ('@ Article', 'R Review')
-  AND pubyear BETWEEN 2005 AND 2014
-  AND type = 'RS'
-GROUP BY pubyear
-ORDER BY pubyear ASC
-```
-
-|      |  fk\_authors|  fk\_institutions|
-|------|------------:|-----------------:|
-| 2005 |         99.3|              90.6|
-| 2006 |         99.2|              90.6|
-| 2007 |         89.4|              82.2|
-| 2008 |         25.9|              23.3|
-| 2009 |         12.0|              11.3|
-| 2010 |         11.3|              10.6|
-| 2011 |         10.5|               9.7|
-| 2012 |          9.9|               9.5|
-| 2013 |          8.9|               5.8|
-| 2014 |          8.3|               4.5|
-
-Differenz zwischen *author\_cnt* und Zählung der *fk\_authors*:
-
-``` sql
-SELECT pubyear, SUM(diff)
-FROM(
-  SELECT DISTINCT fk_items, pubyear,
-    CASE  WHEN author_cnt = (COUNT(DISTINCT fk_authors) OVER (PARTITION BY fk_items))
-            THEN 0
-          ELSE 1
-    END diff
-  FROM wos12b.items it
-  JOIN wos12b.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
-  WHERE datasource = 'WOSCI'
-    AND pubtype = 'J'
-    AND doctype IN ('@ Article', 'R Review')
-    AND pubyear BETWEEN 2005 AND 2014
-    AND type = 'RS'
-)
-GROUP BY pubyear
-ORDER BY pubyear ASC
-```
-
-Differenz zwischen *inst\_cnt* und Zählung der *fk\_institutions*:
-
-``` sql
-SELECT pubyear, SUM(diff)
-FROM(
-  SELECT DISTINCT fk_items, pubyear,
-    CASE  WHEN inst_cnt = (COUNT(DISTINCT fk_institutions) OVER (PARTITION BY fk_items))
-            THEN 0
-          ELSE 1
-    END diff
-  FROM wos12b.items it
-  JOIN wos12b.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
-  WHERE datasource = 'WOSCI'
-    AND pubtype = 'J'
-    AND doctype IN ('@ Article', 'R Review')
-    AND pubyear BETWEEN 2005 AND 2014
-    AND type = 'RS'
-)
-GROUP BY pubyear
-ORDER BY pubyear ASC
-```
-
-|      |  fk\_authors|  fk\_institutions|
-|------|------------:|-----------------:|
-| 2005 |         99.4|              24.9|
-| 2006 |         99.3|              25.5|
-| 2007 |         90.1|              25.5|
-| 2008 |         30.6|              26.3|
-| 2009 |         18.4|              27.1|
-| 2010 |         17.6|              28.3|
-| 2011 |         16.4|              29.1|
-| 2012 |         15.7|              30.2|
-| 2013 |         11.2|              32.1|
-| 2014 |          9.7|              32.7|
+![](README_files/figure-markdown_github/tab_diff-1.png)
 
 Die mangelnde Übereinstimmung zwischen *author\_cnt* und der Zählung *COUNT (DISTINCT fk\_authors)* wird durch die vielen NULL in *type* verursacht.
 
@@ -186,135 +103,57 @@ Scopus
 
 Die Datenqualität von Scopus erscheint signifikant besser zu sein, und zwar für den aktuellen Rand als auch insbesondere für vergangene Jahre.
 
-*Article* und *Review* pro Jahr:
+Prozentualer Anteil von pk\_items mit NULL im fk\_authors oder fk\_institutions (Scopus)
 
-``` sql
-SELECT pubyear, COUNT(DISTINCT fk_items)
-FROM scopus_b_2016.items it
-JOIN scopus_b_2016.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
-WHERE pubtype = 'J'
-  AND doctype IN ('ar', 're')
-  AND pubyear BETWEEN 1996 AND 2014
-  AND type = 'RS'
-GROUP BY pubyear
-ORDER BY pubyear ASC
-```
+|      |  affilation w/o authors|  author w/o affilation|
+|------|-----------------------:|----------------------:|
+| 1996 |                     0.0|                   11.1|
+| 1997 |                     0.0|                   11.3|
+| 1998 |                     0.0|                   10.9|
+| 1999 |                     0.0|                   12.6|
+| 2000 |                     0.0|                   10.7|
+| 2001 |                     0.0|                   10.7|
+| 2002 |                     0.0|                   10.4|
+| 2003 |                     0.0|                   12.5|
+| 2004 |                     0.0|                    8.6|
+| 2005 |                     0.0|                    6.9|
+| 2006 |                     0.0|                    6.0|
+| 2007 |                     0.0|                    5.7|
+| 2008 |                     0.0|                    5.0|
+| 2009 |                     0.0|                    5.0|
+| 2010 |                     0.0|                    6.1|
+| 2011 |                     0.0|                    5.7|
+| 2012 |                     0.0|                    5.4|
+| 2013 |                     0.0|                    4.9|
+| 2014 |                     0.1|                    3.7|
 
-*Article* und *Review* mit *fk\_authors* als NULL:
+![](README_files/figure-markdown_github/tab_friction_sc-1.png)
 
-``` sql
-SELECT pubyear, COUNT(DISTINCT fk_items)
-FROM scopus_b_2016.items it
-JOIN scopus_b_2016.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
-WHERE fk_authors IS NULL
-  AND pubtype = 'J'
-  AND doctype IN ('ar', 're')
-  AND pubyear BETWEEN 1996 AND 2014
-  AND type = 'RS'
-GROUP BY pubyear
-ORDER BY pubyear ASC
-```
+Prozentualer Anteil von pk\_items mit Unterschieden in author\_cnt, bzw. inst\_cnt und Zählung der zugehörigen fk\_authors, bzw. fk\_institutions (Scopus):
 
-*Article* und *Review* mit *fk\_institutions* als NULL:
+|      |  Anzahl Autoren != author\_cnt|  Anzahl Affiliation != inst\_cnt|
+|------|------------------------------:|--------------------------------:|
+| 1996 |                              0|                             23.4|
+| 1997 |                              0|                             24.7|
+| 1998 |                              0|                             26.6|
+| 1999 |                              0|                             33.9|
+| 2000 |                              0|                             33.4|
+| 2001 |                              0|                             23.2|
+| 2002 |                              0|                             21.2|
+| 2003 |                              0|                             22.7|
+| 2004 |                              0|                             24.5|
+| 2005 |                              0|                             25.5|
+| 2006 |                              0|                             25.4|
+| 2007 |                              0|                             25.0|
+| 2008 |                              0|                             25.0|
+| 2009 |                              0|                             21.2|
+| 2010 |                              0|                             20.5|
+| 2011 |                              0|                             21.3|
+| 2012 |                              0|                             21.7|
+| 2013 |                              0|                             21.8|
+| 2014 |                              0|                             11.3|
 
-``` sql
-SELECT pubyear, COUNT(DISTINCT fk_items)
-FROM scopus_b_2016.items it
-JOIN scopus_b_2016.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
-WHERE fk_institutions IS NULL
-  AND pubtype = 'J'
-  AND doctype IN ('ar', 're')
-  AND pubyear BETWEEN 1996 AND 2014
-  AND type = 'RS'
-GROUP BY pubyear
-ORDER BY pubyear ASC
-```
-
-|      |  fk\_authors|  fk\_institutions|
-|------|------------:|-----------------:|
-| 1996 |          0.0|              11.1|
-| 1997 |          0.0|              11.3|
-| 1998 |          0.0|              10.9|
-| 1999 |          0.0|              12.6|
-| 2000 |          0.0|              10.7|
-| 2001 |          0.0|              10.7|
-| 2002 |          0.0|              10.4|
-| 2003 |          0.0|              12.5|
-| 2004 |          0.0|               8.6|
-| 2005 |          0.0|               6.9|
-| 2006 |          0.0|               6.0|
-| 2007 |          0.0|               5.7|
-| 2008 |          0.0|               5.0|
-| 2009 |          0.0|               5.0|
-| 2010 |          0.0|               6.1|
-| 2011 |          0.0|               5.7|
-| 2012 |          0.0|               5.4|
-| 2013 |          0.0|               4.9|
-| 2014 |          0.1|               3.7|
-
-Differenz zwischen *author\_cnt* und Zählung der *fk\_authors*:
-
-``` sql
-SELECT pubyear, SUM(diff)
-FROM(
-  SELECT DISTINCT fk_items, pubyear,
-    CASE  WHEN author_cnt = (COUNT(DISTINCT fk_authors) OVER (PARTITION BY fk_items))
-            THEN 0
-          ELSE 1
-    END diff
-  FROM scopus_b_2016.items it
-  JOIN scopus_b_2016.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
-  WHERE pubtype = 'J'
-    AND doctype IN ('ar', 're')
-    AND pubyear BETWEEN 1996 AND 2014
-    AND type = 'RS'
-)
-GROUP BY pubyear
-ORDER BY pubyear ASC
-```
-
-Differenz zwischen *inst\_cnt* und Zählung der *fk\_institutions*:
-
-``` sql
-SELECT pubyear, SUM(diff)
-FROM(
-  SELECT DISTINCT fk_items, pubyear,
-    CASE  WHEN inst_cnt = (COUNT(DISTINCT fk_institutions) OVER (PARTITION BY fk_items))
-            THEN 0
-          ELSE 1
-    END diff
-  FROM scopus_b_2016.items it
-  JOIN scopus_b_2016.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
-  WHERE pubtype = 'J'
-    AND doctype IN ('ar', 're')
-    AND pubyear BETWEEN 1996 AND 2014
-    AND type = 'RS'
-)
-GROUP BY pubyear
-ORDER BY pubyear ASC
-```
-
-|      |  fk\_authors|  fk\_institutions|
-|------|------------:|-----------------:|
-| 1996 |            0|              23.4|
-| 1997 |            0|              24.7|
-| 1998 |            0|              26.6|
-| 1999 |            0|              33.9|
-| 2000 |            0|              33.4|
-| 2001 |            0|              23.2|
-| 2002 |            0|              21.2|
-| 2003 |            0|              22.7|
-| 2004 |            0|              24.5|
-| 2005 |            0|              25.5|
-| 2006 |            0|              25.4|
-| 2007 |            0|              25.0|
-| 2008 |            0|              25.0|
-| 2009 |            0|              21.2|
-| 2010 |            0|              20.5|
-| 2011 |            0|              21.3|
-| 2012 |            0|              21.7|
-| 2013 |            0|              21.8|
-| 2014 |            0|              11.3|
+![](README_files/figure-markdown_github/tab_diff_sc-1.png)
 
 Das Feld *inst\_cnt* ist derzeit noch nicht in der scopus\_b\_16 gefüllt und verursacht daher die Differenz zur Zählung mittels *COUNT(DISTINCT fk\_institutions)*.
 

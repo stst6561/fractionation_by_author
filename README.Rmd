@@ -1,7 +1,7 @@
 ---
 title: "Fraktionierung auf Autorenebene"
 author: "Stephan Stahlschmidt"
-date: "24 Februar 2017"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
 output: github_document
 bibliography: MeineBibliothek.bib
 csl: emerald-harvard.csl
@@ -12,6 +12,7 @@ knitr::opts_chunk$set(echo = TRUE, cache = TRUE)
 # setting up Oracle connection to local DB
 library("ROracle")
 library("knitr")
+library("viridis")
 OraInit <- Oracle()
 # connect.string <- paste0("(DESCRIPTION=(ADDRESS=(PROTOCOL=tcp)(HOST=srv10-oracle)(PORT=1521))(CONNECT_DATA=(SID=ifqdata)))")
 connect.string <- "(DESCRIPTION=(ADDRESS=(PROTOCOL=tcp)(HOST=127.0.0.1)(PORT=6025))(CONNECT_DATA=(SID=bibliodb01)))"
@@ -22,7 +23,7 @@ OraConn <- dbConnect(OraInit, username=sql_uid, password=sql_pw, dbname = connec
 
 # Sachverhalt
 
-@waltman_field-normalized_2015 zeigen auf das full counting nicht kompatibel mit Feld-Normalisierung ist. Sie schlagen vor eine fractional counting auf Ebene der Autoren durchzuführen.
+@waltman_field-normalized_2015 zeigen auf das full counting nicht kompatibel mit Feld-Normalisierung ist. Sie schlagen vor ein fractional counting auf Ebene der Autoren durchzuführen.
 
 Hierbei entstehen zwei Schwierigkeiten:
 
@@ -56,20 +57,8 @@ Die Biliometriedatenbanken von WoS und Scopus unterscheiden sich in der Nutzung 
 # Probleme
 Die für die Fraktionierung benötigten Felder *fk_authors*, *type* und *fk_institutions* sind nicht immer gut gepflegt.
 
-*Article* und *Review* pro Jahr:
-```{sql connection = OraConn, output.var = "papersByYear", eval = FALSE}
-SELECT pubyear, COUNT(DISTINCT fk_items)
-FROM wos12b.items it
-JOIN wos12b.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
-WHERE datasource = 'WOSCI'
-  AND pubtype = 'J'
-  AND doctype IN ('@ Article', 'R Review')
-  AND pubyear BETWEEN 2005 AND 2014
-  AND type = 'RS'
-GROUP BY pubyear
-ORDER BY pubyear ASC
-```
 ```{r echo = FALSE}
+# Article und Review pro Jahr
 papersByYear <- dbGetQuery(OraConn, strwrap(paste0("
   SELECT pubyear, COUNT(DISTINCT fk_items)
   FROM wos12b.items it
@@ -86,22 +75,8 @@ papersByYear <- dbGetQuery(OraConn, strwrap(paste0("
   )
 ```
 
-
-*Article* und *Review* mit *fk_authors* als NULL:
-```{sql connection = OraConn, output.var = "paperNullAuthor", eval=FALSE}
-SELECT pubyear, COUNT(DISTINCT fk_items)
-FROM wos12b.items it
-JOIN wos12b.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
-WHERE fk_authors IS NULL
-  AND datasource = 'WOSCI'
-  AND pubtype = 'J'
-  AND doctype IN ('@ Article', 'R Review')
-  AND pubyear BETWEEN 2005 AND 2014
-  AND type = 'RS'
-GROUP BY pubyear
-ORDER BY pubyear ASC
-```
 ```{r echo=FALSE}
+# Article und Review mit fk_authors als NULL
 paperNullAuthor <- dbGetQuery(OraConn, strwrap(paste0("
   SELECT pubyear, COUNT(DISTINCT fk_items)
   FROM wos12b.items it
@@ -119,21 +94,8 @@ paperNullAuthor <- dbGetQuery(OraConn, strwrap(paste0("
   )
 ```
 
-*Article* und *Review* mit *fk_institutions* als NULL:
-```{sql connection = OraConn, output.var = "paperNullInstitution", eval = FALSE}
-SELECT pubyear, COUNT(DISTINCT fk_items)
-FROM wos12b.items it
-JOIN wos12b.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
-WHERE fk_institutions IS NULL
-  AND datasource = 'WOSCI'
-  AND pubtype = 'J'
-  AND doctype IN ('@ Article', 'R Review')
-  AND pubyear BETWEEN 2005 AND 2014
-  AND type = 'RS'
-GROUP BY pubyear
-ORDER BY pubyear ASC
-```
 ```{r echo = FALSE}
+# Article und Review mit fk_institutions als NULL
 paperNullInstitution <- dbGetQuery(OraConn, strwrap(paste0("
   SELECT pubyear, COUNT(DISTINCT fk_items)
   FROM wos12b.items it
@@ -149,35 +111,35 @@ paperNullInstitution <- dbGetQuery(OraConn, strwrap(paste0("
   width = 100000, simplify = TRUE)
   )
 ```
+
+Prozentualer Anteil von pk_items mit NULL im fk_authors oder fk_institutions, i.e. fehlende Zuordnung zwischen author und institution:
+
 ```{r tab_friction, echo = FALSE}
 tab_friction <- as.matrix(cbind(paperNullAuthor[,2]/papersByYear[,2], paperNullInstitution[,2]/papersByYear[,2]))*100
 colnames(tab_friction) <- c("fk_authors","fk_institutions")
 rownames(tab_friction) <- as.character(2005:2014)
-kable(tab_friction, digits = 1, caption = "Prozentualer Anteil von pk_items mit NULL im fk_authors oder fk_institutions, i.e. fehlende Zuordnung zwischen author und institution")
+kable(tab_friction,
+      digits = 1,
+      col.names = c("affilation w/o authors", "author w/o affilation")
+      )
+plot(2005:2014, tab_friction[,1],
+     xlim=c(2004,2014),
+     ylim=c(0,100),
+     lwd=2,
+     bty="n",
+     xlab="",
+     ylab="%",
+     type="l",
+     col=viridis(2)[1])
+lines(2005:2014,
+      tab_friction[,2],
+      col=viridis(2)[2],
+      lwd=2)
+legend("topright", legend = c("affilation w/o authors", "author w/o affilation"), fill=viridis(2), bty = "n")
 ```
 
-Differenz zwischen *author_cnt* und Zählung der *fk_authors*:
-
-```{sql connection=OraConn, output.var = "dif_author_counting", eval = FALSE}
-SELECT pubyear, SUM(diff)
-FROM(
-  SELECT DISTINCT fk_items, pubyear,
-    CASE  WHEN author_cnt = (COUNT(DISTINCT fk_authors) OVER (PARTITION BY fk_items))
-            THEN 0
-          ELSE 1
-    END diff
-  FROM wos12b.items it
-  JOIN wos12b.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
-  WHERE datasource = 'WOSCI'
-    AND pubtype = 'J'
-    AND doctype IN ('@ Article', 'R Review')
-    AND pubyear BETWEEN 2005 AND 2014
-    AND type = 'RS'
-)
-GROUP BY pubyear
-ORDER BY pubyear ASC
-```
 ```{r tab_dif_author_counting, echo = FALSE}
+# Differenz zwischen author_cnt und Zählung der fk_authors
 dif_author_counting <- dbGetQuery(OraConn, strwrap(paste0("
   SELECT pubyear, SUM(diff)
   FROM(
@@ -201,28 +163,8 @@ dif_author_counting <- dbGetQuery(OraConn, strwrap(paste0("
   )
 ```
 
-Differenz zwischen *inst_cnt* und Zählung der *fk_institutions*:
-
-```{sql connection=OraConn, output.var = "dif_institutions_counting", eval = FALSE}
-SELECT pubyear, SUM(diff)
-FROM(
-  SELECT DISTINCT fk_items, pubyear,
-    CASE  WHEN inst_cnt = (COUNT(DISTINCT fk_institutions) OVER (PARTITION BY fk_items))
-            THEN 0
-          ELSE 1
-    END diff
-  FROM wos12b.items it
-  JOIN wos12b.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
-  WHERE datasource = 'WOSCI'
-    AND pubtype = 'J'
-    AND doctype IN ('@ Article', 'R Review')
-    AND pubyear BETWEEN 2005 AND 2014
-    AND type = 'RS'
-)
-GROUP BY pubyear
-ORDER BY pubyear ASC
-```
 ```{r tab_dif_institutions_counting, echo = FALSE}
+# Differenz zwischen inst_cnt und Zählung der fk_institutions
 dif_institutions_counting <- dbGetQuery(OraConn, strwrap(paste0("
   SELECT pubyear, SUM(diff)
   FROM(
@@ -244,11 +186,36 @@ dif_institutions_counting <- dbGetQuery(OraConn, strwrap(paste0("
   "),
   width = 100000, simplify = TRUE)
   )
+```
+
+Prozentualer Anteil von pk_items mit Unterschieden in author_cnt, bzw. inst_cnt und Zählung der zugehörigen fk_authors, bzw. fk_institutions:
+
+```{r tab_diff, echo = FALSE}
 tmp <- as.matrix(dif_institutions_counting[,2]/papersByYear[,2] * 100)
 tmp2 <- as.matrix(dif_author_counting[,2]/papersByYear[,2] * 100)
 tmp <- cbind(tmp2,tmp)
 rownames(tmp) <- as.character(2005:2014)
-kable(tmp, digits = 1, caption = "Prozentualer Anteil von pk_items mit Unterschieden in author_cnt, bzw. inst_cnt und Zählung der zugehörigen fk_authors, bzw. fk_institutions", row.names = TRUE, col.names=c("fk_authors", "fk_institutions"))
+kable(tmp,
+      digits = 1,
+      row.names = TRUE,
+      col.names=c("Anzahl Autoren != author_cnt", "Anzahl Affiliation != inst_cnt"))
+plot(2005:2014, tmp[,1],
+     xlim=c(2004,2014),
+     ylim=c(0,100),
+     lwd=2,
+     bty="n",
+     xlab="",
+     ylab="%",
+     type="l",
+     col=viridis(2)[1])
+lines(2005:2014,
+      tmp[,2],
+      col=viridis(2)[2],
+      lwd=2)
+legend("topright",
+       legend = c("Anzahl Autoren != author_cnt", "Anzahl Affiliation != inst_cnt"),
+       fill=viridis(2),
+       bty = "n")
 ```
 
 Die mangelnde Übereinstimmung zwischen *author_cnt* und der Zählung *COUNT (DISTINCT fk_authors)* wird durch die vielen NULL in *type* verursacht.
@@ -259,19 +226,8 @@ Die ansteigende Differenz zwischen *inst_cnt* und der Zählung *COUNT(DISTINCT f
 
 Die Datenqualität von Scopus erscheint signifikant besser zu sein, und zwar für den aktuellen Rand als auch insbesondere für vergangene Jahre.
 
-*Article* und *Review* pro Jahr:
-```{sql connection = OraConn, output.var = "papersByYear_sc", eval = FALSE}
-SELECT pubyear, COUNT(DISTINCT fk_items)
-FROM scopus_b_2016.items it
-JOIN scopus_b_2016.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
-WHERE pubtype = 'J'
-  AND doctype IN ('ar', 're')
-  AND pubyear BETWEEN 1996 AND 2014
-  AND type = 'RS'
-GROUP BY pubyear
-ORDER BY pubyear ASC
-```
 ```{r echo=FALSE}
+# Article und Review pro Jahr
 papersByYear_sc <- dbGetQuery(OraConn, strwrap(paste0("
   SELECT pubyear, COUNT(DISTINCT fk_items)
   FROM scopus_b_2016.items it
@@ -287,20 +243,8 @@ papersByYear_sc <- dbGetQuery(OraConn, strwrap(paste0("
   )
 ```
 
-*Article* und *Review* mit *fk_authors* als NULL:
-```{sql connection = OraConn, output.var = "paperNullAuthor_sc", eval = FALSE}
-SELECT pubyear, COUNT(DISTINCT fk_items)
-FROM scopus_b_2016.items it
-JOIN scopus_b_2016.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
-WHERE fk_authors IS NULL
-  AND pubtype = 'J'
-  AND doctype IN ('ar', 're')
-  AND pubyear BETWEEN 1996 AND 2014
-  AND type = 'RS'
-GROUP BY pubyear
-ORDER BY pubyear ASC
-```
 ```{r echo = FALSE}
+# Article und Review mit fk_authors als NULL
 paperNullAuthor_sc <- dbGetQuery(OraConn, strwrap(paste0("
   SELECT pubyear, COUNT(DISTINCT fk_items)
   FROM scopus_b_2016.items it
@@ -317,20 +261,8 @@ paperNullAuthor_sc <- dbGetQuery(OraConn, strwrap(paste0("
   )
 ```
 
-*Article* und *Review* mit *fk_institutions* als NULL:
-```{sql connection = OraConn, output.var = "paperNullInstitution_sc", eval = FALSE}
-SELECT pubyear, COUNT(DISTINCT fk_items)
-FROM scopus_b_2016.items it
-JOIN scopus_b_2016.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
-WHERE fk_institutions IS NULL
-  AND pubtype = 'J'
-  AND doctype IN ('ar', 're')
-  AND pubyear BETWEEN 1996 AND 2014
-  AND type = 'RS'
-GROUP BY pubyear
-ORDER BY pubyear ASC
-```
 ```{r echo = FALSE}
+# Article und Review mit fk_institutions als NULL
 paperNullInstitution_sc <- dbGetQuery(OraConn, strwrap(paste0("
   SELECT pubyear, COUNT(DISTINCT fk_items)
   FROM scopus_b_2016.items it
@@ -346,35 +278,36 @@ paperNullInstitution_sc <- dbGetQuery(OraConn, strwrap(paste0("
   width = 100000, simplify = TRUE)
   )
 ```
+
+Prozentualer Anteil von pk_items mit NULL im fk_authors oder fk_institutions (Scopus)
+
 ```{r tab_friction_sc, echo = FALSE}
 tab_friction_sc <- as.matrix(cbind(paperNullAuthor_sc[,2]/papersByYear_sc[,2],
                                    paperNullInstitution_sc[,2]/papersByYear_sc[,2]))*100
 colnames(tab_friction_sc) <- c("fk_authors","fk_institutions")
 rownames(tab_friction_sc) <- as.character(1996:2014)
-kable(tab_friction_sc, digits = 1, caption = "Prozentualer Anteil von pk_items mit NULL im fk_authors oder fk_institutions (Scopus)")
+kable(tab_friction_sc,
+      digits = 1,
+      col.names = c("affilation w/o authors", "author w/o affilation")
+      )
+plot(1996:2014, tab_friction_sc[,1],
+     xlim=c(1995,2015),
+     ylim=c(0,20),
+     lwd=2,
+     bty="n",
+     xlab="",
+     ylab="%",
+     type="l",
+     col=viridis(2)[1])
+lines(1996:2014,
+      tab_friction_sc[,2],
+      col=viridis(2)[2],
+      lwd=2)
+legend("topright", legend = c("affilation w/o authors", "author w/o affilation"), fill=viridis(2), bty = "n")
 ```
 
-Differenz zwischen *author_cnt* und Zählung der *fk_authors*:
-
-```{sql connection=OraConn, output.var = "dif_author_counting", eval = FALSE}
-SELECT pubyear, SUM(diff)
-FROM(
-  SELECT DISTINCT fk_items, pubyear,
-    CASE  WHEN author_cnt = (COUNT(DISTINCT fk_authors) OVER (PARTITION BY fk_items))
-            THEN 0
-          ELSE 1
-    END diff
-  FROM scopus_b_2016.items it
-  JOIN scopus_b_2016.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
-  WHERE pubtype = 'J'
-    AND doctype IN ('ar', 're')
-    AND pubyear BETWEEN 1996 AND 2014
-    AND type = 'RS'
-)
-GROUP BY pubyear
-ORDER BY pubyear ASC
-```
 ```{r tab_dif_author_counting_sc, echo = FALSE}
+# Differenz zwischen author_cnt und Zählung der fk_authors
 dif_author_counting_sc <- dbGetQuery(OraConn, strwrap(paste0("
   SELECT pubyear, SUM(diff)
   FROM(
@@ -397,27 +330,8 @@ dif_author_counting_sc <- dbGetQuery(OraConn, strwrap(paste0("
   )
 ```
 
-Differenz zwischen *inst_cnt* und Zählung der *fk_institutions*:
-
-```{sql connection=OraConn, output.var = "dif_institutions_counting", eval = FALSE}
-SELECT pubyear, SUM(diff)
-FROM(
-  SELECT DISTINCT fk_items, pubyear,
-    CASE  WHEN inst_cnt = (COUNT(DISTINCT fk_institutions) OVER (PARTITION BY fk_items))
-            THEN 0
-          ELSE 1
-    END diff
-  FROM scopus_b_2016.items it
-  JOIN scopus_b_2016.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
-  WHERE pubtype = 'J'
-    AND doctype IN ('ar', 're')
-    AND pubyear BETWEEN 1996 AND 2014
-    AND type = 'RS'
-)
-GROUP BY pubyear
-ORDER BY pubyear ASC
-```
 ```{r tab_dif_institutions_counting_sc, echo = FALSE}
+# Differenz zwischen inst_cnt und Zählung der fk_institutions
 dif_institutions_counting_sc <- dbGetQuery(OraConn, strwrap(paste0("
   SELECT pubyear, SUM(diff)
   FROM(
@@ -438,11 +352,36 @@ dif_institutions_counting_sc <- dbGetQuery(OraConn, strwrap(paste0("
   "),
   width = 100000, simplify = TRUE)
   )
+```
+
+Prozentualer Anteil von pk_items mit Unterschieden in author_cnt, bzw. inst_cnt und Zählung der zugehörigen fk_authors, bzw. fk_institutions (Scopus):
+
+```{r tab_diff_sc, echo = FALSE}
 tmp <- as.matrix(dif_institutions_counting_sc[,2]/papersByYear_sc[,2] * 100)
 tmp2 <- as.matrix(dif_author_counting_sc[,2]/papersByYear_sc[,2] * 100)
 tmp <- cbind(tmp2,tmp)
 rownames(tmp) <- as.character(1996:2014)
-kable(tmp, digits = 1, caption = "Prozentualer Anteil von pk_items mit Unterschieden in author_cnt, bzw. inst_cnt und Zählung der zugehörigen fk_authors, bzw. fk_institutions (Scopus)", row.names = TRUE, col.names=c("fk_authors", "fk_institutions"))
+colnames(tmp) <- c("Anzahl Autoren != author_cnt", "Anzahl Affiliation != inst_cnt")
+kable(tmp,
+      digits = 1,
+      row.names = TRUE)
+plot(1996:2014, tmp[,1],
+     xlim=c(1996,2014),
+     ylim=c(0,100),
+     lwd=2,
+     bty="n",
+     xlab="",
+     ylab="%",
+     type="l",
+     col=viridis(2)[1])
+lines(1996:2014,
+      tmp[,2],
+      col=viridis(2)[2],
+      lwd=2)
+legend("topright",
+       legend = c("Anzahl Autoren != author_cnt", "Anzahl Affiliation != inst_cnt"),
+       fill=viridis(2),
+       bty = "n")
 ```
 
 Das Feld *inst_cnt* ist derzeit noch nicht in der scopus_b_16 gefüllt und verursacht daher die Differenz zur Zählung mittels *COUNT(DISTINCT fk_institutions)*.
