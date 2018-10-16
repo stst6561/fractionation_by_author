@@ -1,306 +1,100 @@
 ---
 title: "Fraktionierung auf Autorenebene"
-author: "Stephan Stahlschmidt"
+author: "Stephan Stahlschmidt and Marion Schmidt"
 date: "`r format(Sys.time(), '%d %B, %Y')`"
-output: github_document
+# output: github_document
 bibliography: MeineBibliothek.bib
 csl: emerald-harvard.csl
+output:
+  html_document: default
+  pdf_document: default
+  github_document:
+    html_preview: false
+    toc: true
+    toc_depth: 2
 ---
 
-```{r setup, include=FALSE}
+```{r, setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, cache = TRUE)
 # setting up Oracle connection to local DB
 library("ROracle")
 library("knitr")
 library("viridis")
-OraInit <- Oracle()
-# connect.string <- paste0("(DESCRIPTION=(ADDRESS=(PROTOCOL=tcp)(HOST=srv10-oracle)(PORT=1521))(CONNECT_DATA=(SID=ifqdata)))")
-connect.string <- "(DESCRIPTION=(ADDRESS=(PROTOCOL=tcp)(HOST=127.0.0.1)(PORT=6025))(CONNECT_DATA=(SID=bibliodb01)))"
-source("credentials_local.R")
+library("pool")
+
+# source("credentials_local.R")
 source("credentials.R")
-OraConn <- dbConnect(OraInit, username=sql_uid, password=sql_pw, dbname = connect.string)
+
+# establish sql connection pool
+sql_pool <- dbPool(
+  drv = Oracle(),
+  # dbname = "(DESCRIPTION=(ADDRESS=(PROTOCOL=tcp)(HOST=srv10-oracle)(PORT=1521))(CONNECT_DATA=(SID=ifqdata)))",# local 
+  dbname = "(DESCRIPTION=(ADDRESS=(PROTOCOL=tcp)(HOST=127.0.0.1)(PORT=6025))(CONNECT_DATA=(SID=bibliodb01)))",# FIZ server
+  username = sql_uid,
+  password = sql_pw
+)
+# checking out one sql connection for sql chunks
+conn <- poolCheckout(sql_pool)
 ```
 
-# Sachverhalt
+# Motivation
 
-@waltman_field-normalized_2015 zeigen auf das full counting nicht kompatibel mit Feld-Normalisierung ist. Sie schlagen vor ein fractional counting auf Ebene der Autoren durchzuführen.
+@waltman_field-normalized_2015 demonstrate that whole counting is incompatible with field normalization. They propose fractional counting on the level of authors implemented by fractional counting on address strings.
 
-Hierbei entstehen zwei Schwierigkeiten:
+In any such approach two issues arise:
 
-1. Verschiedene Autoren eines papers können der gleichen Institution angehören
-2. Autoren können gleichzeitig verschiedenen Institutionen angehören
+1. Several authors might be affiliated to the same organisation
+2. Single authors might be affiliated with several organisations
 
-Beispiel:
-```{sql connection=OraConn}
-SELECT fk_items, fk_authors, fk_institutions, type, pubyear, DOI
-FROM wos12b.items it
-JOIN wos12b.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
-WHERE fk_items = 1052207263
+Example:
+```{sql, beispiel, connection=conn}
+SELECT fk_authors, fk_institutions, type, role, organization1, countrycode
+FROM wos_b_2018.items it
+LEFT JOIN wos_b_2018.items_authors_institutions iai ON it.pk_items = iai.fk_items
+LEFT JOIN wos_b_2018.institutions inst ON inst.pk_institutions = iai.fk_institutions
+WHERE ut_eid = '000262133500009'
 ```
 
-Lösung: Basierend auf gut gepflegeten Daten kann die Fraktionierung auf Autorenebene und nachgelagerte Zuschreibung auf Institutionen wie folgt berechnet werden.
-```{sql connection=OraConn}
-SELECT DISTINCT fk_items, fk_institutions,
-  SUM(inst_share) OVER (PARTITION BY fk_items, fk_institutions) AS inst_sum
-FROM(
-  SELECT fk_items, fk_institutions,
-    (1/author_cnt)/(COUNT (fk_institutions) OVER (PARTITION BY fk_items, fk_authors)) AS inst_share
-  FROM wos12b.items it
-  JOIN wos12b.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
-  WHERE fk_items = 1052207263
-    AND type = 'RS'
-  )
-```
+# Potential Solution
 
-Die Biliometriedatenbanken von WoS und Scopus unterscheiden sich in der Nutzung von *fk_authors* und *type*. WoS führt die selbe *fk_authors* ID einmal als *RP* und einmal als *RS*, während in Scopus für den corresponding author zwei verschiedene *fk_authors* IDs vergeben werden, die sich in ihrem *type* (*RS* vs *RP*) unterscheiden. In beiden Datanbanken müssen corresponding authors mit dem *type RP* von der Fraktionierung ausgeschlossen werden.
+Fractional counting based on author attribution and subsequent aggregation to the levle of interest (here: countries) might be computed as follows:
 
-# Probleme
-Die für die Fraktionierung benötigten Felder *fk_authors*, *type*, *author_cnt* und *fk_institutions* sind nicht immer gut gepflegt.
-
-```{r echo = FALSE}
-# Article und Review pro Jahr
-papersByYear <- dbGetQuery(OraConn, strwrap(paste0("
-  SELECT pubyear, COUNT(DISTINCT pk_items)
-  FROM wos12b.items it
-  WHERE datasource = 'WOSCI'
-    AND pubtype = 'J'
-    AND doctype IN ('@ Article', 'R Review')
-    AND pubyear BETWEEN 2005 AND 2014
-  GROUP BY pubyear
-  ORDER BY pubyear ASC
-  "),
-  width = 100000, simplify = TRUE)
-  )
-```
-
-```{r echo=FALSE}
-# inner vs left join between items and items_authors_institutions
-outerInneDiff <- dbGetQuery(OraConn, strwrap(paste0("
-SELECT tmp1.pubyear, (tmp2.count_outer - tmp1.count_inner) AS pub_diff
-  FROM(
-    SELECT pubyear, COUNT(DISTINCT iai.fk_items) count_inner
-    FROM wos12b.items it
-    JOIN wos12b.items_authors_institutions iai ON it.pk_items=iai.fk_items
-    WHERE datasource = 'WOSCI'
-      AND pubtype = 'J'
-      AND doctype IN ('@ Article', 'R Review')
-      AND pubyear BETWEEN 2005 AND 2014
-    GROUP BY pubyear) tmp1
-  JOIN(
-    SELECT pubyear, COUNT(DISTINCT iai.fk_items) count_outer
-    FROM wos12b.items it
-    LEFT JOIN wos12b.items_authors_institutions iai ON it.pk_items=iai.fk_items
-    WHERE datasource = 'WOSCI'
-      AND pubtype = 'J'
-      AND doctype IN ('@ Article', 'R Review')
-      AND pubyear BETWEEN 2005 AND 2014
-    GROUP BY pubyear) tmp2 ON tmp1.pubyear = tmp2.pubyear
-  ORDER BY tmp1.pubyear ASC
-  "),
-  width = 100000, simplify = TRUE)
-  ) 
-```
-
-```{r echo=FALSE}
-# Article und Review mit fk_authors als NULL
-paperNullAuthor <- dbGetQuery(OraConn, strwrap(paste0("
-  SELECT pubyear, COUNT(DISTINCT fk_items)
-  FROM wos12b.items it
-  JOIN wos12b.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
-  WHERE fk_authors IS NULL
-    AND datasource = 'WOSCI'
-    AND pubtype = 'J'
-    AND doctype IN ('@ Article', 'R Review')
-    AND pubyear BETWEEN 2005 AND 2014
-    AND (type = 'RS' OR type IS NULL)
-  GROUP BY pubyear
-  ORDER BY pubyear ASC
-  "),
-  width = 100000, simplify = TRUE)
-  )
-```
-
-```{r echo = FALSE}
-# Article und Review mit fk_institutions als NULL
-paperNullInstitution <- dbGetQuery(OraConn, strwrap(paste0("
-  SELECT pubyear, COUNT(DISTINCT fk_items)
-  FROM wos12b.items it
-  JOIN wos12b.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
-  WHERE fk_institutions IS NULL
-    AND datasource = 'WOSCI'
-    AND pubtype = 'J'
-    AND doctype IN ('@ Article', 'R Review')
-    AND pubyear BETWEEN 2005 AND 2014
-    AND (type = 'RS' OR type IS NULL)
-  GROUP BY pubyear
-  ORDER BY pubyear ASC
-  "),
-  width = 100000, simplify = TRUE)
-  )
-```
-
-```{r echo=FALSE}
-# article or review with no information on type
-paperNullType <- dbGetQuery(OraConn, strwrap(paste0("
-  SELECT pubyear, COUNT(DISTINCT fk_items)
-  FROM wos12b.items it
-  JOIN wos12b.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
-  WHERE type IS NULL
-    AND datasource = 'WOSCI'
-    AND pubtype = 'J'
-    AND doctype IN ('@ Article', 'R Review')
-    AND pubyear BETWEEN 2005 AND 2014
-  GROUP BY pubyear
-  ORDER BY pubyear ASC
-  "),
-  width = 100000, simplify = TRUE)
-  )
-```
-
-```{r echo=FALSE}
-# all potential missing information jointly
-paperOverall <- dbGetQuery(OraConn, strwrap(paste0("
-  SELECT pubyear, COUNT(DISTINCT pk_items)
-  FROM wos12b.items
-  JOIN wos12b.items_authors_institutions ON pk_items = fk_items
-  WHERE datasource = 'WOSCI'
-    AND pubtype = 'J'
-    AND doctype IN ('@ Article', 'R Review')
-    AND pubyear BETWEEN 2005 AND 2014
-    AND ((fk_institutions IS NULL
-          AND (type = 'RS' OR type IS NULL)) OR
-        (fk_authors IS NULL
-          AND (type = 'RS' OR type IS NULL)) OR
-        (type IS NULL))
-  GROUP BY pubyear
-  ORDER BY pubyear ASC
-  "),
-  width = 100000, simplify = TRUE)
-  )
-```
-
-
-Prozentualer Anteil von pk_items mit vollständig oder anteilig fehlenden Informationen:
-
-```{r tab_friction, echo = FALSE}
-tab_friction <- as.matrix(cbind(outerInneDiff[,2]/papersByYear[,2],
-                                paperNullType[,2]/papersByYear[,2],
-                                paperNullInstitution[,2]/papersByYear[,2],
-                                paperNullAuthor[,2]/papersByYear[,2],
-                                (paperOverall[,2] + outerInneDiff[,2])/papersByYear[,2])*100)
-colnames(tab_friction) <- c("no author & affiliation",
-                            "no author type",
-                            "author w/o affiliation",
-                            "affiliation w/o authors",
-                            "total")
-rownames(tab_friction) <- as.character(2005:2014)
-kable(tab_friction,
-      digits = 1
+```{sql, loesung, connection=conn}
+SELECT fk_items, countrycode, SUM(orga_frak) AS cntry_frac -- aggregating on country level
+FROM( -- aggregating on organization1 level
+    SELECT fk_items, organization1, countrycode, SUM(orga_share)  AS orga_frak
+    FROM( -- computing fractional contribution of organsation on author level
+      SELECT DISTINCT fk_items, organization1, countrycode, fk_authors,
+        (1/(COUNT (DISTINCT fk_authors) OVER (PARTITION BY fk_items))) / 
+        (COUNT (DISTINCT organization1) OVER (PARTITION BY fk_items, fk_authors)) AS orga_share
+      FROM wos_b_2018.items it
+      JOIN wos_b_2018.items_authors_institutions iai ON it.pk_items = iai.fk_items
+      JOIN wos_b_2018.institutions inst ON inst.pk_institutions = iai.fk_institutions
+      WHERE ut_eid = '000262133500009'
+        AND role = 'author'
+        AND type = 'RS'
       )
-matplot(2005:2014, tab_friction,
-     xlim=c(2004,2014),
-     ylim=c(0,100),
-     lwd=2,
-     lty = 1,
-     bty="n",
-     xlab="",
-     ylab="%",
-     type="l",
-     col = rev(viridis(5)))
-legend("topright", legend = rev(colnames(tab_friction)), fill=viridis(5), bty = "n")
+    GROUP BY fk_items, organization1, countrycode
+)
+GROUP BY fk_items, countrycode
 ```
 
-```{r tab_dif_author_counting, echo = FALSE}
-# Differenz zwischen author_cnt und Zählung der fk_authors
-dif_author_counting <- dbGetQuery(OraConn, strwrap(paste0("
-  SELECT pubyear, SUM(diff)
-  FROM(
-    SELECT DISTINCT fk_items, pubyear,
-      CASE  WHEN author_cnt = (COUNT(DISTINCT fk_authors) OVER (PARTITION BY fk_items))
-              THEN 0
-            ELSE 1
-      END diff
-    FROM wos12b.items it
-    JOIN wos12b.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
-    WHERE datasource = 'WOSCI'
-      AND pubtype = 'J'
-      AND doctype IN ('@ Article', 'R Review')
-      AND pubyear BETWEEN 2005 AND 2014
-      AND (type = 'RS' OR type IS NULL)
-  )
-  GROUP BY pubyear
-  ORDER BY pubyear ASC
-  "),
-  width = 100000, simplify = TRUE)
-  )
-```
+The *KB* versions of *Web of Science* and *Scopus* differ in their usage of *fk_authors*, *type* and *role* (Why?). WoS holds the same *fk_authors* as a corresponding author (*RP*) and as an ordinary author (*RS*), while SCP assigns two different *fk_authors* for the same author which vary in their type (*RP* or *RS*). In any case entries for corresponding authors have to excluded via the *RP* type. Furthermore in the WoS authors have to be separated from other roles via *role = 'author'*.
 
-```{r tab_dif_institutions_counting, echo = FALSE}
-# Differenz zwischen inst_cnt und Zählung der fk_institutions
-dif_institutions_counting <- dbGetQuery(OraConn, strwrap(paste0("
-  SELECT pubyear, SUM(diff)
-  FROM(
-    SELECT DISTINCT fk_items, pubyear,
-      CASE  WHEN inst_cnt = (COUNT(DISTINCT fk_institutions) OVER (PARTITION BY fk_items))
-              THEN 0
-            ELSE 1
-      END diff
-    FROM wos12b.items it
-    JOIN wos12b.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
-    WHERE datasource = 'WOSCI'
-      AND pubtype = 'J'
-      AND doctype IN ('@ Article', 'R Review')
-      AND pubyear BETWEEN 2005 AND 2014
-      AND (type = 'RS' OR type IS NULL)
-  )
-  GROUP BY pubyear
-  ORDER BY pubyear ASC
-  "),
-  width = 100000, simplify = TRUE)
-  )
-```
+# Data Quality
 
-Prozentualer Anteil von pk_items mit Unterschieden in author_cnt, bzw. inst_cnt und Zählung der zugehörigen fk_authors, bzw. fk_institutions:
+Necessary information in variables like *Organization1*, *role* and *type* might not always be available and especially before 2008 the link between authors (*fk_authors*) and their affiliated organisation (*fk_institutions*) was most often only recorded for the corresponding author.
 
-```{r tab_diff, echo = FALSE}
-tmp <- as.matrix(dif_institutions_counting[,2]/papersByYear[,2] * 100)
-tmp2 <- as.matrix(dif_author_counting[,2]/papersByYear[,2] * 100)
-tmp <- cbind(tmp2,tmp)
-rownames(tmp) <- as.character(2005:2014)
-kable(tmp,
-      digits = 1,
-      row.names = TRUE,
-      col.names=c("# Autoren != author_cnt", "# Affiliationen != inst_cnt"))
-matplot(2005:2014, tmp,
-     xlim=c(2004,2014),
-     ylim=c(0,100),
-     lwd=2,
-     lty=1,
-     bty="n",
-     xlab="",
-     ylab="%",
-     type="l",
-     col=viridis(2))
-legend("topright",
-       legend = c("# Autoren != author_cnt", "# Affiliationen != inst_cnt"),
-       fill=viridis(2),
-       bty = "n")
-```
-
-Die ansteigende Differenz zwischen *inst_cnt* und der Zählung *COUNT(DISTINCT fk_institutions)* erklärt sich aus der Tatsache, dass für verschieden Untereinheiten einer Universität verschieden *fk_institutions* vergeben werden, während *inst_cnt* nur die aggregierte Einheit, sprich die Universität als ganzes, zählt.
-
-# Scopus
-
-Die Datenqualität von Scopus erscheint signifikant besser zu sein, und zwar für den aktuellen Rand als auch insbesondere für vergangene Jahre.
-
-```{r echo=FALSE}
+```{r, echo=FALSE}
+# returning sql connection to pool
+poolReturn(conn)
 # Article und Review pro Jahr
-papersByYear_sc <- dbGetQuery(OraConn, strwrap(paste0("
+papersByYear <- dbGetQuery(sql_pool, strwrap(paste0("
   SELECT pubyear, COUNT(DISTINCT pk_items)
-  FROM scopus_b_2016.items it
-  WHERE pubtype = 'J'
-  AND doctype IN ('ar', 're')
-    AND pubyear BETWEEN 1996 AND 2014
+  FROM wos_b_2018.items it
+  WHERE pubtype = 'Journal'
+    AND doctype IN ('Article', 'Review')
+    AND pubyear BETWEEN 2007 AND 2017
   GROUP BY pubyear
   ORDER BY pubyear ASC
   "),
@@ -308,25 +102,25 @@ papersByYear_sc <- dbGetQuery(OraConn, strwrap(paste0("
   )
 ```
 
-```{r echo=FALSE}
+```{r, echo=FALSE}
 # inner vs left join between items and items_authors_institutions
-outerInneDiff_sc <- dbGetQuery(OraConn, strwrap(paste0("
+outerInneDiff <- dbGetQuery(sql_pool, strwrap(paste0("
 SELECT tmp1.pubyear, (tmp2.count_outer - tmp1.count_inner) AS pub_diff
   FROM(
     SELECT pubyear, COUNT(DISTINCT iai.fk_items) count_inner
-    FROM scopus_b_2016.items it
-    JOIN scopus_b_2016.items_authors_institutions iai ON it.pk_items=iai.fk_items
-    WHERE pubtype = 'J'
-      AND doctype IN ('ar', 're')
-      AND pubyear BETWEEN 1996 AND 2014
+    FROM wos_b_2018.items it
+    JOIN wos_b_2018.items_authors_institutions iai ON it.pk_items=iai.fk_items
+    WHERE pubtype = 'Journal'
+      AND doctype IN ('Article', 'Review')
+      AND pubyear BETWEEN 2007 AND 2017
     GROUP BY pubyear) tmp1
   JOIN(
     SELECT pubyear, COUNT(DISTINCT iai.fk_items) count_outer
-    FROM scopus_b_2016.items it
-    LEFT JOIN scopus_b_2016.items_authors_institutions iai ON it.pk_items=iai.fk_items
-    WHERE pubtype = 'J'
-      AND doctype IN ('ar', 're')
-      AND pubyear BETWEEN 1996 AND 2014
+    FROM wos_b_2018.items it
+    LEFT JOIN wos_b_2018.items_authors_institutions iai ON it.pk_items=iai.fk_items
+    WHERE pubtype = 'Journal'
+      AND doctype IN ('Article', 'Review')
+      AND pubyear BETWEEN 2007 AND 2017
     GROUP BY pubyear) tmp2 ON tmp1.pubyear = tmp2.pubyear
   ORDER BY tmp1.pubyear ASC
   "),
@@ -334,17 +128,18 @@ SELECT tmp1.pubyear, (tmp2.count_outer - tmp1.count_inner) AS pub_diff
   ) 
 ```
 
-```{r echo = FALSE}
+```{r, echo=FALSE}
 # Article und Review mit fk_authors als NULL
-paperNullAuthor_sc <- dbGetQuery(OraConn, strwrap(paste0("
+paperNullAuthor <- dbGetQuery(sql_pool, strwrap(paste0("
   SELECT pubyear, COUNT(DISTINCT fk_items)
-  FROM scopus_b_2016.items it
-  JOIN scopus_b_2016.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
+  FROM wos_b_2018.items it
+  JOIN wos_b_2018.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
   WHERE fk_authors IS NULL
-    AND pubtype = 'J'
-    AND doctype IN ('ar', 're')
-    AND pubyear BETWEEN 1996 AND 2014
+    AND pubtype = 'Journal'
+    AND doctype IN ('Article', 'Review')
+    AND pubyear BETWEEN 2007 AND 2017
     AND (type = 'RS' OR type IS NULL)
+    AND (role = 'author' OR role IS NULL)
   GROUP BY pubyear
   ORDER BY pubyear ASC
   "),
@@ -352,17 +147,18 @@ paperNullAuthor_sc <- dbGetQuery(OraConn, strwrap(paste0("
   )
 ```
 
-```{r echo = FALSE}
+```{r, echo=FALSE}
 # Article und Review mit fk_institutions als NULL
-paperNullInstitution_sc <- dbGetQuery(OraConn, strwrap(paste0("
+paperNullInstitution <- dbGetQuery(sql_pool, strwrap(paste0("
   SELECT pubyear, COUNT(DISTINCT fk_items)
-  FROM scopus_b_2016.items it
-  JOIN scopus_b_2016.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
+  FROM wos_b_2018.items it
+  JOIN wos_b_2018.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
   WHERE fk_institutions IS NULL
-    AND pubtype = 'J'
-    AND doctype IN ('ar', 're')
-    AND pubyear BETWEEN 1996 AND 2014
+    AND pubtype = 'Journal'
+    AND doctype IN ('Article', 'Review')
+    AND pubyear BETWEEN 2007 AND 2017
     AND (type = 'RS' OR type IS NULL)
+    AND (role = 'author' OR role IS NULL)
   GROUP BY pubyear
   ORDER BY pubyear ASC
   "),
@@ -370,42 +166,40 @@ paperNullInstitution_sc <- dbGetQuery(OraConn, strwrap(paste0("
   )
 ```
 
-```{r echo=FALSE}
+```{r, echo=FALSE}
 # article or review with no information on type
-paperNullType_sc <- dbGetQuery(OraConn, strwrap(paste0("
+paperNullType <- dbGetQuery(sql_pool, strwrap(paste0("
   SELECT pubyear, COUNT(DISTINCT fk_items)
-  FROM scopus_b_2016.items it
-  JOIN scopus_b_2016.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
+  FROM wos_b_2018.items it
+  JOIN wos_b_2018.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
   WHERE type IS NULL
-    AND pubtype = 'J'
-    AND doctype IN ('ar', 're')
-    AND pubyear BETWEEN 1996 AND 2014
+    AND pubtype = 'Journal'
+    AND doctype IN ('Article', 'Review')
+    AND pubyear BETWEEN 2007 AND 2017
   GROUP BY pubyear
   ORDER BY pubyear ASC
   "),
   width = 100000, simplify = TRUE)
   )
-if(dim(paperNullType_sc)[1]==0){
-  paperNullType_sc <- matrix(NA, nrow = length(1996:2014), ncol = 2)
-  paperNullType_sc[,1] <- 1996:2014
-  paperNullType_sc[,2] <- 0
+if(dim(paperNullType)[1]==0){
+  paperNullType <- as.data.frame(matrix(
+    c(2007:2017,rep(0,11)),
+    nrow=11,
+    ncol=2
+  ))
 }
 ```
 
-```{r echo=FALSE}
-# all potential missing information jointly
-paperOverall_sc <- dbGetQuery(OraConn, strwrap(paste0("
-  SELECT pubyear, COUNT(DISTINCT pk_items)
-  FROM scopus_b_2016.items
-  JOIN scopus_b_2016.items_authors_institutions ON pk_items = fk_items
-  WHERE pubtype = 'J'
-    AND doctype IN ('ar', 're')
-    AND pubyear BETWEEN 1996 AND 2014
-    AND ((fk_institutions IS NULL
-          AND (type = 'RS' OR type IS NULL)) OR
-        (fk_authors IS NULL
-          AND (type = 'RS' OR type IS NULL)) OR
-        (type IS NULL))
+```{r, echo=FALSE}
+# article or review with no information on role
+paperNullRole <- dbGetQuery(sql_pool, strwrap(paste0("
+  SELECT pubyear, COUNT(DISTINCT fk_items)
+  FROM wos_b_2018.items it
+  JOIN wos_b_2018.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
+  WHERE role IS NULL
+    AND pubtype = 'Journal'
+    AND doctype IN ('Article', 'Review')
+    AND pubyear BETWEEN 2007 AND 2017
   GROUP BY pubyear
   ORDER BY pubyear ASC
   "),
@@ -413,25 +207,84 @@ paperOverall_sc <- dbGetQuery(OraConn, strwrap(paste0("
   )
 ```
 
-Prozentualer Anteil von pk_items mit fehlenden Informationen (Scopus):
+```{r, echo=FALSE}
+# article or review with no information on organization1
+paperNullorganization1 <- dbGetQuery(sql_pool, strwrap(paste0("
+  SELECT pubyear, COUNT(DISTINCT fk_items)
+  FROM wos_b_2018.items it
+  JOIN wos_b_2018.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
+  JOIN wos_b_2018.institutions inst ON inst.pk_institutions = iai.fk_institutions
+  WHERE organization1 IS NULL
+    AND pubtype = 'Journal'
+    AND doctype IN ('Article', 'Review')
+    AND pubyear BETWEEN 2007 AND 2017
+  GROUP BY pubyear
+  ORDER BY pubyear ASC
+  "),
+  width = 100000, simplify = TRUE)
+  )
+```
 
-```{r tab_friction_sc, echo = FALSE}
-tab_friction_sc <- as.matrix(cbind(outerInneDiff_sc[,2]/papersByYear_sc[,2],
-                                paperNullType_sc[,2]/papersByYear_sc[,2],
-                                paperNullInstitution_sc[,2]/papersByYear_sc[,2],
-                                paperNullAuthor_sc[,2]/papersByYear_sc[,2],
-                                (paperOverall_sc[,2] + outerInneDiff_sc[,2])/papersByYear_sc[,2])*100)
-colnames(tab_friction_sc) <- c("no author & affiliation",
-                            "no author type",
-                            "author w/o affiliation",
-                            "affiliation w/o authors",
+```{r, echo=FALSE}
+# all potential missing information jointly
+paperOverall <- dbGetQuery(sql_pool, strwrap(paste0("
+  SELECT pubyear, COUNT(pk_items)
+  FROM(
+  SELECT DISTINCT pubyear, pk_items
+  FROM wos_b_2018.items it
+  JOIN wos_b_2018.items_authors_institutions iai ON it.pk_items = iai.fk_items
+  WHERE pubtype = 'Journal'
+    AND doctype IN ('Article', 'Review')
+    AND pubyear BETWEEN 2007 AND 2017
+    AND ((fk_institutions IS NULL
+          AND (type = 'RS' OR type IS NULL) AND (role = 'author' OR role IS NULL)) OR
+        (fk_authors IS NULL
+          AND (type = 'RS' OR type IS NULL) AND (role = 'author' OR role IS NULL)) OR
+        (type IS NULL) OR
+        (role IS NULL))
+  UNION
+  SELECT DISTINCT pubyear,  pk_items
+  FROM wos_b_2018.items it
+  JOIN wos_b_2018.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
+  JOIN wos_b_2018.institutions inst ON inst.pk_institutions = iai.fk_institutions
+  WHERE organization1 IS NULL
+    AND pubtype = 'Journal'
+    AND doctype IN ('Article', 'Review')
+    AND pubyear BETWEEN 2007 AND 2017
+  )
+  GROUP BY pubyear
+  ORDER BY pubyear ASC
+  "),
+  width = 100000, simplify = TRUE)
+  )
+```
+
+Percentages of pk_items with partially missing information:
+
+```{r, tab_friction, echo=FALSE, cache=FALSE}
+# print(outerInneDiff[,2])
+# print(paperOverall[,2]/papersByYear[,2])
+# print((paperOverall[,2] + outerInneDiff[,2])/papersByYear[,2])
+tab_friction <- as.matrix(cbind(outerInneDiff[,2]/papersByYear[,2],
+                                paperNullType[,2]/papersByYear[,2],
+                                paperNullRole[,2]/papersByYear[,2],
+                                paperNullInstitution[,2]/papersByYear[,2],
+                                paperNullAuthor[,2]/papersByYear[,2],
+                                paperNullorganization1[,2]/papersByYear[,2],
+                                (paperOverall[,2] + outerInneDiff[,2])/papersByYear[,2])*100)
+colnames(tab_friction) <- c("only pk_item ",
+                            "no type",
+                            "no role",
+                            "no affiliation",
+                            "no author",
+                            "No Organization1",
                             "total")
-rownames(tab_friction_sc) <- as.character(1996:2014)
-kable(tab_friction_sc,
+rownames(tab_friction) <- as.character(2007:2017)
+kable(tab_friction,
       digits = 1
       )
-matplot(1996:2014, tab_friction_sc,
-     xlim=c(1995,2015),
+matplot(2007:2017, tab_friction,
+     xlim=c(2007,2017),
      ylim=c(0,100),
      lwd=2,
      lty = 1,
@@ -439,99 +292,762 @@ matplot(1996:2014, tab_friction_sc,
      xlab="",
      ylab="%",
      type="l",
-     col = rev(viridis(5)))
-legend("topright", legend = rev(colnames(tab_friction)), fill=viridis(5), bty = "n")
+     col = rev(viridis(7)))
+legend("topright", legend = rev(colnames(tab_friction)), fill=viridis(7), bty = "n")
 ```
 
-```{r tab_dif_author_counting_sc, echo = FALSE}
-# Differenz zwischen author_cnt und Zählung der fk_authors
-dif_author_counting_sc <- dbGetQuery(OraConn, strwrap(paste0("
-  SELECT pubyear, SUM(diff)
-  FROM(
-    SELECT DISTINCT fk_items, pubyear,
-      CASE  WHEN author_cnt = (COUNT(DISTINCT fk_authors) OVER (PARTITION BY fk_items))
-              THEN 0
-            ELSE 1
-      END diff
-    FROM scopus_b_2016.items it
-    JOIN scopus_b_2016.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
-    WHERE pubtype = 'J'
-    AND doctype IN ('ar', 're')
-    AND pubyear BETWEEN 1996 AND 2014
-    AND (type = 'RS' OR type IS NULL)
-  )
-  GROUP BY pubyear
-  ORDER BY pubyear ASC
-  "),
-  width = 100000, simplify = TRUE)
-  )
+
+<!-- ```{r tab_dif_author_counting, echo = FALSE, eval = FALSE} -->
+<!-- # Differenz zwischen author_cnt und Zählung der fk_authors -->
+<!-- dif_author_counting <- dbGetQuery(sql_pool, strwrap(paste0(" -->
+<!--   SELECT pubyear, SUM(diff) -->
+<!--   FROM( -->
+<!--     SELECT DISTINCT fk_items, pubyear, -->
+<!--       CASE  WHEN author_cnt = (COUNT(DISTINCT fk_authors) OVER (PARTITION BY fk_items)) -->
+<!--               THEN 0 -->
+<!--             ELSE 1 -->
+<!--       END diff -->
+<!--     FROM wos_b_2018.items it -->
+<!--     JOIN wos_b_2018.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items -->
+<!--     WHERE pubtype = 'Journal' -->
+<!--       AND doctype IN ('Article', 'Review') -->
+<!--       AND pubyear BETWEEN 2007 AND 2017 -->
+<!--       AND type = 'RS' -->
+<!--       AND role = 'author' -->
+<!--   ) -->
+<!--   GROUP BY pubyear -->
+<!--   ORDER BY pubyear ASC -->
+<!--   "), -->
+<!--   width = 100000, simplify = TRUE) -->
+<!--   ) -->
+<!-- ``` -->
+
+<!-- Prozentualer Anteil von pk_items mit Unterschieden in author_cnt und Zählung der zugehörigen fk_authors: -->
+
+<!-- ```{r tab_diff, echo = FALSE, eval = FALSE} -->
+<!-- tmp <- as.matrix(dif_author_counting[,2]/papersByYear[,2] * 100) -->
+<!-- rownames(tmp) <- as.character(2007:2017) -->
+<!-- kable(tmp, -->
+<!--       digits = 1, -->
+<!--       row.names = TRUE, -->
+<!--       col.names=c("# Autoren != author_cnt")) -->
+<!-- matplot(2007:2017, tmp, -->
+<!--      xlim=c(2007,2017), -->
+<!--      ylim=c(0,100), -->
+<!--      lwd=2, -->
+<!--      lty=1, -->
+<!--      bty="n", -->
+<!--      xlab="", -->
+<!--      ylab="%", -->
+<!--      type="l", -->
+<!--      col=viridis(2)) -->
+<!-- # legend("topright", -->
+<!-- #        legend = c("# Autoren != author_cnt", "# Affiliationen != inst_cnt"), -->
+<!-- #        fill=viridis(2), -->
+<!-- #        bty = "n") -->
+<!-- ``` -->
+
+# Implementation
+
+Due to large shares of items with incomplete information we propose a hybrid spproach. We (1) fractionalize on the author level (and subsequently aggregate to the country level) for every pk_item with complete information in the *items_authors_institutions* table and (2) apply fractionalization on the organisation level (and therefore ignore any authors) via *organization1* for all other pk_items. Hence we follow @waltman_field-normalized_2015 but account for data quality issues at the same time.
+
+In detail we compute a table which holds country specific weights for fractional counting. Lower aggregates levels like organisations might also be computed.
+
+```sql
+DROP TABLE items_iai_complete;
+DROP TABLE wosb2018_frc_cntrylvl;
+
+/*
+Create temporaray table as an indicator of items with complete iai record:
+*/
+CREATE GLOBAL TEMPORARY TABLE items_iai_complete (
+    fk_items NUMBER
+)
+ON COMMIT DELETE ROWS;
+
+/*
+create empty table defining fractional weight for every paper by country
+causes implicit commit
+*/
+CREATE TABLE wosb2018_frc_cntrylvl (
+    fk_items NUMBER,
+    countrycode VARCHAR2(10 CHAR),
+    frac_share NUMBER(3,2),
+    ind_complete NUMBER(1,0)
+);
+
+/*
+populate temporary table
+*/
+INSERT INTO items_iai_complete (
+SELECT DISTINCT tmp.fk_items -- subset of items with complete iai information
+FROM( -- counts numbers of entries in iai for every item
+    SELECT fk_items, COUNT (*) AS entry_cnt
+    FROM wos_b_2018.items it
+    LEFT JOIN wos_b_2018.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
+    LEFT JOIN wos_b_2018.institutions inst ON inst.pk_institutions = iai.fk_institutions
+    WHERE (role IS NULL OR role = 'author') -- we only care for authors and missing information, other roles are neglected
+        AND pubtype = 'Journal'
+        AND doctype IN ('Article', 'Review')
+        AND pubyear BETWEEN 2007 AND 2017
+    GROUP BY fk_items
+) tmp
+JOIN( -- counts numbers of COMPLETE entries in iai for every item
+    SELECT fk_items, COUNT (*) AS entry_cnt
+    FROM wos_b_2018.items it
+    LEFT JOIN wos_b_2018.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
+    LEFT JOIN wos_b_2018.institutions inst ON inst.pk_institutions = iai.fk_institutions
+    WHERE pubtype = 'Journal'
+        AND doctype IN ('Article', 'Review')
+        AND pubyear BETWEEN 2007 AND 2017
+        AND fk_institutions IS NOT NULL
+        AND fk_authors IS NOT NULL
+        AND role = 'author'
+        AND type IS NOT NULL
+    GROUP BY fk_items
+) tmp2 ON tmp.fk_items = tmp2.fk_items
+AND tmp.entry_cnt = tmp2.entry_cnt); -- compare both numbers
+
+/*
+include items with COMPLETE iai information via fractional counting on author level:
+*/
+INSERT INTO wosb2018_frc_cntrylvl
+SELECT fk_items, countrycode, SUM(orga_frak) AS frac_share, 1 -- aggregating on country level
+FROM( -- aggregating on organization1 level
+    SELECT fk_items, organization1, countrycode, SUM(orga_share)  AS orga_frak
+    FROM( -- computing fractional contribution of organsation on author level
+      SELECT DISTINCT fk_items, ORGANIZATION1, countrycode, fk_authors,
+        (1/(COUNT (DISTINCT fk_authors) OVER (PARTITION BY fk_items)))
+        /(COUNT (DISTINCT organization1) OVER (PARTITION BY fk_items, fk_authors)) AS orga_share
+      FROM wos_b_2018.items it
+      JOIN wos_b_2018.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
+      JOIN wos_b_2018.institutions inst ON inst.pk_institutions = iai.fk_institutions
+      WHERE pubtype = 'Journal'
+        AND doctype IN ('Article', 'Review')
+        AND pubyear BETWEEN 2007 AND 2017
+        AND role = 'author'
+        AND type = 'RS'
+        AND pk_items IN (SELECT fk_items FROM items_iai_complete)
+        AND organization1 IS NOT NULL
+      )
+    GROUP BY fk_items, organization1, countrycode
+)
+GROUP BY fk_items, countrycode, 1;
+
+/*
+include items with INCOMPLETE iai information via fractional counting on organization level:
+*/
+INSERT INTO wosb2018_frc_cntrylvl
+SELECT fk_items, countrycode, SUM(orga_frak) AS frac_share, 0 -- aggregating on country level
+FROM( -- aggregating on organization1 level
+    SELECT fk_items, organization1, countrycode, SUM(orga_share)  AS orga_frak
+    FROM( -- computing fractional contribution on organisation level
+      SELECT DISTINCT fk_items, ORGANIZATION1, countrycode,
+        (1/(COUNT (DISTINCT organization1) OVER (PARTITION BY fk_items))) AS orga_share
+      FROM wos_b_2018.items it
+      JOIN wos_b_2018.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
+      JOIN wos_b_2018.institutions inst ON inst.pk_institutions = iai.fk_institutions
+      WHERE pubtype = 'Journal'
+        AND doctype IN ('Article', 'Review')
+        AND pubyear BETWEEN 2007 AND 2017
+        AND (role = 'author' OR role IS NULL)
+        AND type = 'RS'
+        AND pk_items NOT IN (SELECT fk_items FROM items_iai_complete)
+        AND organization1 IS NOT NULL
+      )
+    GROUP BY fk_items, organization1, countrycode
+)
+GROUP BY fk_items, countrycode, 0;
+
+CREATE INDEX wosb2018_frc_cntrylvl_ix ON wosb2018_frc_cntrylvl (fk_items, countrycode);
+
+COMMIT;
 ```
 
-```{r tab_dif_institutions_counting_sc, echo = FALSE}
-# Differenz zwischen inst_cnt und Zählung der fk_institutions
-dif_institutions_counting_sc <- dbGetQuery(OraConn, strwrap(paste0("
-  SELECT pubyear, SUM(diff)
-  FROM(
-    SELECT DISTINCT fk_items, pubyear,
-      CASE  WHEN inst_cnt = (COUNT(DISTINCT fk_institutions) OVER (PARTITION BY fk_items))
-              THEN 0
-            ELSE 1
-      END diff
-    FROM scopus_b_2016.items it
-    JOIN scopus_b_2016.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
-    WHERE pubtype = 'J'
-    AND doctype IN ('ar', 're')
-    AND pubyear BETWEEN 1996 AND 2014
-    AND (type = 'RS' OR type IS NULL)
-  )
-  GROUP BY pubyear
-  ORDER BY pubyear ASC
-  "),
-  width = 100000, simplify = TRUE)
-  )
+# Caveats
+
+* Whenever an authors holds several affiliations of which two or more actually describe the same organisation, but have not been cleaned in *organization1*, we assign erroneous weights. This issue might be less severe on a country level analysis and could ultimately only be resolved via a worldwide institution harmonization.
+* Affiliations without an *organzation1* are omitted, e.g. private addresses (1,2% in wos_b_2018)
+* anonymous authors (*role = 'anon'*) are omitted
+* Any other?
+
+# Comparison
+
+As an alternative implementation we also compute weights based on fractionation on the *organization1* level:
+
+```sql
+
+/*
+create empty table defining fractional weight for every paper by country
+based on fractionation on organization1 level
+*/
+CREATE TABLE wosb2018_frc_cntrylvl_org1 (
+    fk_items NUMBER,
+    countrycode VARCHAR2(10 CHAR),
+    frac_share NUMBER(3,2)
+);
+
+/*
+include items with INCOMPLETE iai information via fractional counting on organization level:
+*/
+INSERT INTO wosb2018_frc_cntrylvl_org1
+SELECT fk_items, countrycode, SUM(orga_frak) AS frac_share -- aggregating on country level
+FROM( -- aggregating on organization1 level
+    SELECT fk_items, organization1, countrycode, SUM(orga_share)  AS orga_frak
+    FROM( -- computing fractional contribution on organisation level
+      SELECT DISTINCT fk_items, ORGANIZATION1, countrycode,
+        (1/(COUNT (DISTINCT organization1) OVER (PARTITION BY fk_items))) AS orga_share
+      FROM wos_b_2018.items it
+      JOIN wos_b_2018.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
+      JOIN wos_b_2018.institutions inst ON inst.pk_institutions = iai.fk_institutions
+      WHERE pubtype = 'Journal'
+        AND doctype IN ('Article', 'Review')
+        AND pubyear BETWEEN 2007 AND 2017
+        AND (role = 'author' OR role IS NULL)
+        AND type = 'RS'
+        AND organization1 IS NOT NULL
+      )
+    GROUP BY fk_items, organization1, countrycode
+)
+GROUP BY fk_items, countrycode;
+
+CREATE INDEX wosb2018_frc_cntrylvl_org1_idx ON wosb2018_frc_cntrylvl_org1 (fk_items, countrycode);
+
+COMMIT;
 ```
 
-Prozentualer Anteil von pk_items mit Unterschieden in author_cnt, bzw. inst_cnt und Zählung der zugehörigen fk_authors, bzw. fk_institutions (Scopus):
+Computing fractional counts of publications on national level for 2017:
 
-```{r tab_diff_sc, echo = FALSE}
-tmp <- as.matrix(dif_institutions_counting_sc[,2]/papersByYear_sc[,2] * 100)
-tmp2 <- as.matrix(dif_author_counting_sc[,2]/papersByYear_sc[,2] * 100)
-tmp <- cbind(tmp2,tmp)
-rownames(tmp) <- as.character(1996:2014)
-colnames(tmp) <- c("# Autoren != author_cnt", "# Affiliation != inst_cnt")
-kable(tmp,
-      digits = 1,
-      row.names = TRUE)
-matplot(1996:2014, tmp,
-     xlim=c(1996,2014),
-     ylim=c(0,100),
-     lwd=2,
-     lty=1,
-     bty="n",
-     xlab="",
-     ylab="%",
-     type="l",
-     col=viridis(2))
-legend("topright",
-       legend = c("# Autoren != author_cnt", "# Affiliation != inst_cnt"),
-       fill=viridis(2),
-       bty = "n")
+```{r, testing1, echo=FALSE, cache=TRUE}
+# hybrid approach
+pubs_cntry_whole_wos_frac <- dbGetQuery(sql_pool, strwrap(paste0("
+    SELECT country, pubyear, SUM(frac_share) pub_cnt_frak
+    FROM(
+      SELECT DISTINCT it.pubyear, inst.countrycode country, it.pk_items, frak.frac_share
+      FROM wos_b_2018.items it
+      JOIN wos_b_2018.items_authors_institutions iai ON it.pk_items=iai.fk_items
+        AND (iai.role = 'author' OR iai.role IS NULL)
+      JOIN wos_b_2018.institutions inst ON inst.pk_institutions=iai.fk_institutions
+      JOIN wosb2018_frc_cntrylvl frak ON frak.fk_items = it.pk_items
+        AND frak.countrycode = inst.countrycode
+      WHERE it.pubyear = 2017
+        AND it.doctype IN ('Article','Review')
+        AND it.pubtype = 'Journal'
+        AND inst.countrycode IN ('AUT', 'BEL', 'BRA', 'CAN', 'CHE', 'CHN', 'DNK', 'DEU', 'ESP', 'FIN', 'FRA', 
+                                   'GBR', 'IND', 'ISR', 'ITA', 'JPN', 'KOR', 'NLD', 'POL', 'RUS', 'SWE', 'USA', 'ZAF')
+    )
+    GROUP BY country, pubyear
+    ORDER BY pub_cnt_frak DESC
+    "),
+    width = 100000, simplify=TRUE)
+)
+```
+```{r, testing2, echo=FALSE, cache=TRUE}
+# ISI approach
+pubs_cntry_whole_wos_frac_ISI <- dbGetQuery(sql_pool, strwrap(paste0("
+    SELECT country, pubyear, SUM(frac_share) pub_cnt_frak_ISI
+    FROM(
+      SELECT DISTINCT it.pubyear, inst.countrycode country, it.pk_items, frak.frac_share
+      FROM wos_b_2018.items it
+      JOIN wos_b_2018.items_authors_institutions iai ON it.pk_items=iai.fk_items
+        AND (iai.role = 'author' OR iai.role IS NULL)
+      JOIN wos_b_2018.institutions inst ON inst.pk_institutions=iai.fk_institutions
+      JOIN wosb2018_frc_cntrylvl_org1 frak ON frak.fk_items = it.pk_items
+        AND frak.countrycode = inst.countrycode
+      WHERE it.pubyear = 2017
+        AND it.doctype IN ('Article','Review')
+        AND it.pubtype = 'Journal'
+        AND inst.countrycode IN ('AUT', 'BEL', 'BRA', 'CAN', 'CHE', 'CHN', 'DNK', 'DEU', 'ESP', 'FIN', 'FRA', 
+                                   'GBR', 'IND', 'ISR', 'ITA', 'JPN', 'KOR', 'NLD', 'POL', 'RUS', 'SWE', 'USA', 'ZAF')
+    )
+    GROUP BY country, pubyear
+    ORDER BY pub_cnt_frak_ISI DESC
+    "),
+    width = 100000, simplify=TRUE)
+)
 ```
 
-# Zusammenfassung
+```{r, echo=FALSE, cache=FALSE}
+# table
+pubs_cnt_compa <- cbind(pubs_cntry_whole_wos_frac, pubs_cntry_whole_wos_frac_ISI)
+print(pubs_cnt_compa)
+# kable(pubs_cnt_compa[1,3,4,6],
+#       digits = 2
+#       )
 
-Für die gebotene Fraktionierung auf Autorenebene ist eine gut gepflegte Zuschreibung zwischen Autor und Institution essentiell.
+# kable(pubs_cntry_whole_wos_frac,
+#       digits = 2
+#       )
+# kable(pubs_cntry_whole_wos_frac_ISI,
+#       digits = 2
+#       )
+```
 
-Im WoS reduziert sich das Ausmaß fehlender Zuordnung zwischen Autor und Institution bisher nicht auf ein einstelliges Prozentniveau (normiert auf *pk_items*), allerdings ist ein deutliche Verbesserung der Datenqualität ab 2008 beobachtbar.
+Only Italy and Korea swap places in this ranking of productivity.
 
-In Scopus liegt die Rate von *pk_items* mit ungenügender Zuordnung dagegen seit 2004 auf einstelligem Niveau und vorher auf sehr niedrigem zweistelligen Niveau. Verantworlich hierfür sind ausschießlich Autoren ohne zugeteilite affiliation.
+<!-- # Scopus: scopus_b_2017 -->
 
-Eine Nutzung der WoS für Fraktionierungszwecke erscheint, wenn überhaupt, nur für den aktuellen Rand angebracht, während Scopus Daten auch für die Vergangenheit ein ausreichendes Niveau aufweisen sollten.
+<!-- Die Datenqualität von Scopus erscheint signifikant besser zu sein, und zwar für den aktuellen Rand als auch insbesondere für vergangene Jahre. -->
 
-In beiden Datenbanken kann der Anteil nicht integer Daten mittels Annahmen gesenkt werden. Beispeilhaft könnte eine einzelne ohne Bindung zu *fk_authors* stehende *affiliation* auf alle Autoren angewandt werden, da mit hoher Wahrscheinlichkeit alle Autoren dieser *affiliation* angehören.
+<!-- ```{r, echo=FALSE} -->
+<!-- # Article und Review pro Jahr -->
+<!-- papersByYear_sc <- dbGetQuery(sql_pool, strwrap(paste0(" -->
+<!--   SELECT pubyear, COUNT(DISTINCT pk_items) -->
+<!--   FROM scopus_b_2017.items it -->
+<!--   WHERE pubtype = 'J' -->
+<!--   AND doctype IN ('ar', 're') -->
+<!--     AND pubyear BETWEEN 2007 AND 2016 -->
+<!--   GROUP BY pubyear -->
+<!--   ORDER BY pubyear ASC -->
+<!--   "), -->
+<!--   width = 100000, simplify = TRUE) -->
+<!--   ) -->
+<!-- ``` -->
 
-```{r teardown, include=FALSE}
-dbDisconnect(OraConn)
+<!-- ```{r, echo=FALSE} -->
+<!-- # inner vs left join between items and items_authors_institutions -->
+<!-- outerInneDiff_sc <- dbGetQuery(sql_pool, strwrap(paste0(" -->
+<!-- SELECT tmp1.pubyear, (tmp2.count_outer - tmp1.count_inner) AS pub_diff -->
+<!--   FROM( -->
+<!--     SELECT pubyear, COUNT(DISTINCT iai.fk_items) count_inner -->
+<!--     FROM scopus_b_2017.items it -->
+<!--     JOIN scopus_b_2017.items_authors_institutions iai ON it.pk_items=iai.fk_items -->
+<!--     WHERE pubtype = 'J' -->
+<!--       AND doctype IN ('ar', 're') -->
+<!--       AND pubyear BETWEEN 2007 AND 2016 -->
+<!--     GROUP BY pubyear) tmp1 -->
+<!--   JOIN( -->
+<!--     SELECT pubyear, COUNT(DISTINCT iai.fk_items) count_outer -->
+<!--     FROM scopus_b_2017.items it -->
+<!--     LEFT JOIN scopus_b_2017.items_authors_institutions iai ON it.pk_items=iai.fk_items -->
+<!--     WHERE pubtype = 'J' -->
+<!--       AND doctype IN ('ar', 're') -->
+<!--       AND pubyear BETWEEN 2007 AND 2016 -->
+<!--     GROUP BY pubyear) tmp2 ON tmp1.pubyear = tmp2.pubyear -->
+<!--   ORDER BY tmp1.pubyear ASC -->
+<!--   "), -->
+<!--   width = 100000, simplify = TRUE) -->
+<!--   )  -->
+<!-- ``` -->
+
+<!-- ```{r, echo=FALSE} -->
+<!-- # Article und Review mit fk_authors als NULL -->
+<!-- paperNullAuthor_sc <- dbGetQuery(sql_pool, strwrap(paste0(" -->
+<!--   SELECT pubyear, COUNT(DISTINCT fk_items) -->
+<!--   FROM scopus_b_2017.items it -->
+<!--   JOIN scopus_b_2017.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items -->
+<!--   WHERE fk_authors IS NULL -->
+<!--     AND pubtype = 'J' -->
+<!--     AND doctype IN ('ar', 're') -->
+<!--     AND pubyear BETWEEN 2007 AND 2016 -->
+<!--     AND (type = 'RS' OR type IS NULL) -->
+<!--   GROUP BY pubyear -->
+<!--   ORDER BY pubyear ASC -->
+<!--   "), -->
+<!--   width = 100000, simplify = TRUE) -->
+<!--   ) -->
+<!-- ``` -->
+
+<!-- ```{r, echo=FALSE} -->
+<!-- # Article und Review mit fk_institutions als NULL -->
+<!-- paperNullInstitution_sc <- dbGetQuery(sql_pool, strwrap(paste0(" -->
+<!--   SELECT pubyear, COUNT(DISTINCT fk_items) -->
+<!--   FROM scopus_b_2017.items it -->
+<!--   JOIN scopus_b_2017.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items -->
+<!--   WHERE fk_institutions IS NULL -->
+<!--     AND pubtype = 'J' -->
+<!--     AND doctype IN ('ar', 're') -->
+<!--     AND pubyear BETWEEN 2007 AND 2016 -->
+<!--     AND (type = 'RS' OR type IS NULL) -->
+<!--   GROUP BY pubyear -->
+<!--   ORDER BY pubyear ASC -->
+<!--   "), -->
+<!--   width = 100000, simplify = TRUE) -->
+<!--   ) -->
+<!-- ``` -->
+
+<!-- ```{r, echo=FALSE} -->
+<!-- # article or review with no information on type -->
+<!-- paperNullType_sc <- dbGetQuery(sql_pool, strwrap(paste0(" -->
+<!--   SELECT pubyear, COUNT(DISTINCT fk_items) -->
+<!--   FROM scopus_b_2017.items it -->
+<!--   JOIN scopus_b_2017.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items -->
+<!--   WHERE type IS NULL -->
+<!--     AND pubtype = 'J' -->
+<!--     AND doctype IN ('ar', 're') -->
+<!--     AND pubyear BETWEEN 2007 AND 2016 -->
+<!--   GROUP BY pubyear -->
+<!--   ORDER BY pubyear ASC -->
+<!--   "), -->
+<!--   width = 100000, simplify = TRUE) -->
+<!--   ) -->
+<!-- if(dim(paperNullType_sc)[1]==0){ -->
+<!--   paperNullType_sc <- matrix(NA, nrow = length(2007:2016), ncol = 2) -->
+<!--   paperNullType_sc[,1] <- 2007:2016 -->
+<!--   paperNullType_sc[,2] <- 0 -->
+<!-- } -->
+<!-- ``` -->
+
+<!-- ```{r, echo=FALSE} -->
+<!-- # article or review with no information on organization1 -->
+<!-- paperNullorganization1_sc <- dbGetQuery(sql_pool, strwrap(paste0(" -->
+<!--   SELECT pubyear, COUNT(DISTINCT fk_items) -->
+<!--   FROM scopus_b_2017.items it -->
+<!--   JOIN scopus_b_2017.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items -->
+<!--   JOIN scopus_b_2017.institutions inst ON inst.pk_institutions = iai.fk_institutions -->
+<!--   WHERE organization1 IS NULL -->
+<!--     AND pubtype = 'J' -->
+<!--     AND doctype IN ('ar', 're') -->
+<!--     AND pubyear BETWEEN 2007 AND 2016 -->
+<!--   GROUP BY pubyear -->
+<!--   ORDER BY pubyear ASC -->
+<!--   "), -->
+<!--   width = 100000, simplify = TRUE) -->
+<!--   ) -->
+<!-- ``` -->
+
+<!-- ```{r, echo=FALSE} -->
+<!-- # all potential missing information jointly -->
+<!-- paperOverall_sc <- dbGetQuery(sql_pool, strwrap(paste0(" -->
+<!--   SELECT pubyear, COUNT(pk_items) -->
+<!--   FROM( -->
+<!--   SELECT DISTINCT pubyear, pk_items -->
+<!--   FROM scopus_b_2017.items it -->
+<!--   JOIN scopus_b_2017.items_authors_institutions iai ON it.pk_items = iai.fk_items -->
+<!--   WHERE pubtype = 'J' -->
+<!--     AND doctype IN ('ar', 're') -->
+<!--     AND pubyear BETWEEN 2007 AND 2016 -->
+<!--     AND ((fk_institutions IS NULL -->
+<!--           AND (type = 'RS' OR type IS NULL)) OR -->
+<!--         (fk_authors IS NULL -->
+<!--           AND (type = 'RS' OR type IS NULL)) OR -->
+<!--         (type IS NULL)) -->
+<!--   UNION -->
+<!--   SELECT DISTINCT pubyear,  pk_items -->
+<!--   FROM scopus_b_2017.items it -->
+<!--   JOIN scopus_b_2017.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items -->
+<!--   JOIN scopus_b_2017.institutions inst ON inst.pk_institutions = iai.fk_institutions -->
+<!--   WHERE organization1 IS NULL -->
+<!--     AND pubtype = 'J' -->
+<!--     AND doctype IN ('ar', 're') -->
+<!--     AND pubyear BETWEEN 2007 AND 2016 -->
+<!--   ) -->
+<!--   GROUP BY pubyear -->
+<!--   ORDER BY pubyear ASC  "), -->
+<!--   width = 100000, simplify = TRUE) -->
+<!--   ) -->
+<!-- ``` -->
+
+<!-- Prozentualer Anteil von pk_items mit fehlenden Informationen (Scopus): -->
+
+<!-- ```{r, tab_friction_sc, echo=FALSE, cache=FALSE} -->
+<!-- tab_friction_sc <- as.matrix(cbind(outerInneDiff_sc[,2]/papersByYear_sc[,2], -->
+<!--                                 paperNullType_sc[,2]/papersByYear_sc[,2], -->
+<!--                                 paperNullInstitution_sc[,2]/papersByYear_sc[,2], -->
+<!--                                 paperNullAuthor_sc[,2]/papersByYear_sc[,2], -->
+<!--                                 paperNullorganization1_sc/papersByYear_sc[,2], -->
+<!--                                 (paperOverall_sc[,2] + outerInneDiff_sc[,2])/papersByYear_sc[,2])*100) -->
+<!-- colnames(tab_friction_sc) <- c("no author nor affiliation", -->
+<!--                             "no author type", -->
+<!--                             "author w/o affiliation", -->
+<!--                             "affiliation w/o authors", -->
+<!--                             "no organization1", -->
+<!--                             "total") -->
+<!-- rownames(tab_friction_sc) <- as.character(2007:2016) -->
+<!-- kable(tab_friction_sc, -->
+<!--       digits = 1 -->
+<!--       ) -->
+<!-- matplot(2007:2016, tab_friction_sc, -->
+<!--      xlim=c(2007,2016), -->
+<!--      ylim=c(0,100), -->
+<!--      lwd=2, -->
+<!--      lty = 1, -->
+<!--      bty="n", -->
+<!--      xlab="", -->
+<!--      ylab="%", -->
+<!--      type="l", -->
+<!--      col = rev(viridis(6))) -->
+<!-- legend("topright", legend = rev(colnames(tab_friction)), fill=viridis(6), bty = "n") -->
+<!-- ``` -->
+
+<!-- ```{r, tab_dif_author_counting_sc, echo=FALSE, eval=FALSE} -->
+<!-- # Differenz zwischen author_cnt und Zählung der fk_authors -->
+<!-- dif_author_counting_sc <- dbGetQuery(sql_pool, strwrap(paste0(" -->
+<!--   SELECT pubyear, SUM(diff) -->
+<!--   FROM( -->
+<!--     SELECT DISTINCT fk_items, pubyear, -->
+<!--       CASE  WHEN author_cnt = (COUNT(DISTINCT fk_authors) OVER (PARTITION BY fk_items)) -->
+<!--               THEN 0 -->
+<!--             ELSE 1 -->
+<!--       END diff -->
+<!--     FROM scopus_b_2017.items it -->
+<!--     JOIN scopus_b_2017.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items -->
+<!--     WHERE pubtype = 'J' -->
+<!--     AND doctype IN ('ar', 're') -->
+<!--     AND pubyear BETWEEN 2007 AND 2016 -->
+<!--     AND (type = 'RS' OR type IS NULL) -->
+<!--   ) -->
+<!--   GROUP BY pubyear -->
+<!--   ORDER BY pubyear ASC -->
+<!--   "), -->
+<!--   width = 100000, simplify = TRUE) -->
+<!--   ) -->
+<!-- ``` -->
+
+<!-- Prozentualer Anteil von pk_items mit Unterschieden in author_cnt und Zählung der zugehörigen fk_authors (Scopus): -->
+
+<!-- ```{r, tab_diff_sc, echo=FALSE, eval=FALSE, cache=FALSE} -->
+<!-- tmp <- as.matrix(dif_author_counting_sc[,2]/papersByYear_sc[,2] * 100) -->
+<!-- rownames(tmp) <- as.character(2007:2016) -->
+<!-- colnames(tmp) <- c("# Autoren != author_cnt") -->
+<!-- kable(tmp, -->
+<!--       digits = 1, -->
+<!--       row.names = TRUE) -->
+<!-- matplot(2007:2016, tmp, -->
+<!--      xlim=c(2007,2016), -->
+<!--      ylim=c(0,100), -->
+<!--      lwd=2, -->
+<!--      lty=1, -->
+<!--      bty="n", -->
+<!--      xlab="", -->
+<!--      ylab="%", -->
+<!--      type="l", -->
+<!--      col=viridis(2)) -->
+<!-- # legend("topright", -->
+<!-- #        legend = c("# Autoren != author_cnt", "# Affiliation != inst_cnt"), -->
+<!-- #        fill=viridis(2), -->
+<!-- #        bty = "n") -->
+<!-- ``` -->
+
+<!-- ## Implementation in Scopus -->
+
+<!-- ```sql -->
+<!-- DROP TABLE items_iai_complete_scp; -->
+<!-- DROP TABLE scopusb2017_frc_cntrylvl; -->
+
+<!-- /* -->
+<!-- Create temporaray table as an indicator of items with complete iai record: -->
+<!-- */ -->
+<!-- CREATE GLOBAL TEMPORARY TABLE items_iai_complete_scp ( -->
+<!--     fk_items NUMBER -->
+<!-- ) -->
+<!-- ON COMMIT DELETE ROWS; -->
+
+<!-- /* -->
+<!-- create empty table defining fractional weight for every paper by country -->
+<!-- causes implicit commit -->
+<!-- */ -->
+<!-- CREATE TABLE scopusb2017_frc_cntrylvl ( -->
+<!--     fk_items NUMBER, -->
+<!--     countrycode VARCHAR2(10 CHAR), -->
+<!--     frac_share NUMBER(3,2), -->
+<!--     ind_complete NUMBER(1,0) -->
+<!-- ); -->
+
+<!-- /* -->
+<!-- populate temporary table -->
+<!-- */ -->
+<!-- INSERT INTO items_iai_complete_scp ( -->
+<!-- SELECT DISTINCT tmp.fk_items -- subset of items with complete iai information -->
+<!-- FROM( -- counts numbers of entries in iai for every item -->
+<!--     SELECT fk_items, COUNT (*) AS entry_cnt -->
+<!--     FROM scopus_b_2017.items it -->
+<!--     LEFT JOIN scopus_b_2017.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items -->
+<!--     LEFT JOIN scopus_b_2017.institutions inst ON inst.pk_institutions = iai.fk_institutions -->
+<!--     WHERE pubtype = 'J' -->
+<!--         AND doctype IN ('ar', 're') -->
+<!--         AND pubyear BETWEEN 2007 AND 2016 -->
+<!--     GROUP BY fk_items -->
+<!-- ) tmp -->
+<!-- JOIN( -- counts numbers of COMPLETE entries in iai for every item -->
+<!--     SELECT fk_items, COUNT (*) AS entry_cnt -->
+<!--     FROM scopus_b_2017.items it -->
+<!--     LEFT JOIN scopus_b_2017.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items -->
+<!--     LEFT JOIN scopus_b_2017.institutions inst ON inst.pk_institutions = iai.fk_institutions -->
+<!--     WHERE pubtype = 'J' -->
+<!--         AND doctype IN ('ar', 're') -->
+<!--         AND pubyear BETWEEN 2007 AND 2016 -->
+<!--         AND fk_institutions IS NOT NULL -->
+<!--         AND fk_authors IS NOT NULL -->
+<!--         AND type IS NOT NULL -->
+<!--     GROUP BY fk_items -->
+<!-- ) tmp2 ON tmp.fk_items = tmp2.fk_items -->
+<!-- AND tmp.entry_cnt = tmp2.entry_cnt); -- compare both numbers -->
+
+<!-- /* -->
+<!-- include items with COMPLETE iai information via fractional counting on author level: -->
+<!-- */ -->
+<!-- INSERT INTO scopusb2017_frc_cntrylvl -->
+<!-- SELECT fk_items, countrycode, SUM(orga_frak) AS frac_share, 1 -- aggregating on country level -->
+<!-- FROM( -- aggregating on organization1 level -->
+<!--     SELECT fk_items, organization1, countrycode, SUM(orga_share)  AS orga_frak -->
+<!--     FROM( -- computing fractional contribution of organsation on author level -->
+<!--       SELECT DISTINCT fk_items, ORGANIZATION1, countrycode, fk_authors, -->
+<!--         (1/(COUNT (DISTINCT fk_authors) OVER (PARTITION BY fk_items)))/(COUNT (DISTINCT organization1) OVER (PARTITION BY fk_items, fk_authors)) AS orga_share -->
+<!--       FROM scopus_b_2017.items it -->
+<!--       JOIN scopus_b_2017.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items -->
+<!--       JOIN scopus_b_2017.institutions inst ON inst.pk_institutions = iai.fk_institutions -->
+<!--       WHERE pubtype = 'J' -->
+<!--         AND doctype IN ('ar', 're') -->
+<!--         AND pubyear BETWEEN 2007 AND 2016 -->
+<!--         AND type = 'RS' -->
+<!--         AND pk_items IN (SELECT fk_items FROM items_iai_complete_scp) -->
+<!--         AND organization1 IS NOT NULL -->
+<!--       ) -->
+<!--     GROUP BY fk_items, organization1, countrycode -->
+<!-- ) -->
+<!-- GROUP BY fk_items, countrycode, 1; -->
+
+<!-- /* -->
+<!-- include items with INCOMPLETE iai information via fractional counting on organization level: -->
+<!-- */ -->
+<!-- INSERT INTO scopusb2017_frc_cntrylvl -->
+<!-- SELECT fk_items, countrycode, SUM(orga_frak) AS frac_share, 0 -- aggregating on country level -->
+<!-- FROM( -- aggregating on organization1 level -->
+<!--     SELECT fk_items, organization1, countrycode, SUM(orga_share)  AS orga_frak -->
+<!--     FROM( -- computing fractional contribution on organisation level -->
+<!--       SELECT DISTINCT fk_items, ORGANIZATION1, countrycode, -->
+<!--         (1/(COUNT (DISTINCT organization1) OVER (PARTITION BY fk_items))) AS orga_share -->
+<!--       FROM scopus_b_2017.items it -->
+<!--       JOIN scopus_b_2017.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items -->
+<!--       JOIN scopus_b_2017.institutions inst ON inst.pk_institutions = iai.fk_institutions -->
+<!--       WHERE pubtype = 'J' -->
+<!--         AND doctype IN ('ar', 're') -->
+<!--         AND pubyear BETWEEN 2007 AND 2016 -->
+<!--         AND type = 'RS' -->
+<!--         AND pk_items NOT IN (SELECT fk_items FROM items_iai_complete_scp) -->
+<!--         AND organization1 IS NOT NULL -->
+<!--       ) -->
+<!--     GROUP BY fk_items, organization1, countrycode -->
+<!-- ) -->
+<!-- GROUP BY fk_items, countrycode, 0; -->
+
+<!-- CREATE INDEX wosb2018_frc_cntrylvl_ix ON wosb2018_frc_cntrylvl (fk_items, countrycode); -->
+
+<!-- COMMIT; -->
+<!-- ``` -->
+<!-- ## Comparison -->
+
+<!-- As an alternative implementation we also compute weights based on fractionation on the *organization1* level: -->
+
+<!-- ```sql -->
+
+<!-- /* -->
+<!-- create empty table defining fractional weight for every paper by country -->
+<!-- based on fractionation on organization1 level -->
+<!-- */ -->
+<!-- CREATE TABLE scopusb2017_frc_cntrylvl_org1 ( -->
+<!--     fk_items NUMBER, -->
+<!--     countrycode VARCHAR2(10 CHAR), -->
+<!--     frac_share NUMBER(3,2) -->
+<!-- ); -->
+
+<!-- /* -->
+<!-- include items with INCOMPLETE iai information via fractional counting on organization level: -->
+<!-- */ -->
+<!-- INSERT INTO scopusb2017_frc_cntrylvl_org1 -->
+<!-- SELECT fk_items, countrycode, SUM(orga_frak) AS frac_share -- aggregating on country level -->
+<!-- FROM( -- aggregating on organization1 level -->
+<!--     SELECT fk_items, organization1, countrycode, SUM(orga_share)  AS orga_frak -->
+<!--     FROM( -- computing fractional contribution on organisation level -->
+<!--       SELECT DISTINCT fk_items, ORGANIZATION1, countrycode, -->
+<!--         (1/(COUNT (DISTINCT organization1) OVER (PARTITION BY fk_items))) AS orga_share -->
+<!--       FROM scopus_b_2017.items it -->
+<!--       JOIN scopus_b_2017.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items -->
+<!--       JOIN scopus_b_2017.institutions inst ON inst.pk_institutions = iai.fk_institutions -->
+<!--       WHERE pubtype = 'J' -->
+<!--         AND doctype IN ('ar', 're') -->
+<!--         AND pubyear BETWEEN 2007 AND 2016 -->
+<!--         AND type = 'RS' -->
+<!--         AND organization1 IS NOT NULL -->
+<!--       ) -->
+<!--     GROUP BY fk_items, organization1, countrycode -->
+<!-- ) -->
+<!-- GROUP BY fk_items, countrycode; -->
+
+<!-- CREATE INDEX wosb2017_frc_cntrylvl_org1_scp_idx ON wosb2018_frc_cntrylvl_org1_scp (fk_items, countrycode); -->
+
+<!-- COMMIT; -->
+<!-- ``` -->
+
+<!-- Computing fractional counts of publications on national level for 2016: -->
+
+<!-- ```{r, testing_scp, echo=FALSE, cache=TRUE} -->
+<!-- # hybrid approach -->
+<!-- pubs_cntry_whole_wos_frac_scp <- dbGetQuery(sql_pool, strwrap(paste0(" -->
+<!--     SELECT country, pubyear, SUM(frac_share) pub_cnt_frak -->
+<!--     FROM( -->
+<!--       SELECT DISTINCT it.pubyear, inst.countrycode country, it.pk_items, frak.frac_share -->
+<!--       FROM scopus_b_2017.items it -->
+<!--       JOIN scopus_b_2017.items_authors_institutions iai ON it.pk_items=iai.fk_items -->
+<!--       JOIN scopus_b_2017.institutions inst ON inst.pk_institutions=iai.fk_institutions -->
+<!--       JOIN scopusb2018_frc_cntrylvl frak ON frak.fk_items = it.pk_items -->
+<!--         AND frak.countrycode = inst.countrycode -->
+<!--       WHERE it.pubyear = 2016 -->
+<!--         AND it.doctype IN ('ar','re') -->
+<!--         AND it.pubtype = 'J' -->
+<!--         AND inst.countrycode IN ('AUT', 'BEL', 'BRA', 'CAN', 'CHE', 'CHN', 'DNK', 'DEU', 'ESP', 'FIN', 'FRA',  -->
+<!--                                    'GBR', 'IND', 'ISR', 'ITA', 'JPN', 'KOR', 'NLD', 'POL', 'RUS', 'SWE', 'USA', 'ZAF') -->
+<!--     ) -->
+<!--     GROUP BY country, pubyear -->
+<!--     ORDER BY pub_cnt_frak DESC -->
+<!--     "), -->
+<!--     width = 100000, simplify=TRUE) -->
+<!-- ) -->
+<!-- # ISI approach -->
+<!-- pubs_cntry_whole_wos_frac_ISI_scp <- dbGetQuery(sql_pool, strwrap(paste0(" -->
+<!--     SELECT country, pubyear, SUM(frac_share) pub_cnt_frak_ISI -->
+<!--     FROM( -->
+<!--       SELECT DISTINCT it.pubyear, inst.countrycode country, it.pk_items, frak.frac_share -->
+<!--       FROM scopus_b_2017.items it -->
+<!--       JOIN scopus_b_2017.items_authors_institutions iai ON it.pk_items=iai.fk_items -->
+<!--       JOIN scopus_b_2017.institutions inst ON inst.pk_institutions=iai.fk_institutions -->
+<!--       JOIN scopusb2017_frc_cntrylvl_org1 frak ON frak.fk_items = it.pk_items -->
+<!--         AND frak.countrycode = inst.countrycode -->
+<!--       WHERE it.pubyear = 2016 -->
+<!--         AND it.doctype IN ('ar','re') -->
+<!--         AND it.pubtype = 'J' -->
+<!--         AND inst.countrycode IN ('AUT', 'BEL', 'BRA', 'CAN', 'CHE', 'CHN', 'DNK', 'DEU', 'ESP', 'FIN', 'FRA',  -->
+<!--                                    'GBR', 'IND', 'ISR', 'ITA', 'JPN', 'KOR', 'NLD', 'POL', 'RUS', 'SWE', 'USA', 'ZAF') -->
+<!--     ) -->
+<!--     GROUP BY country, pubyear -->
+<!--     ORDER BY pub_cnt_frak_ISI DESC -->
+<!--     "), -->
+<!--     width = 100000, simplify=TRUE) -->
+<!-- ) -->
+<!-- ``` -->
+
+<!-- ```{r, echo=FALSE, cache=FALSE} -->
+<!-- # table -->
+<!-- pubs_cnt_compa <- cbind(pubs_cntry_whole_wos_frac_scp, pubs_cntry_whole_wos_frac_ISI_scp) -->
+<!-- print(pubs_cnt_compa) -->
+<!-- # kable(pubs_cnt_compa[1,3,4,6], -->
+<!-- #       digits = 2 -->
+<!-- #       ) -->
+
+<!-- # kable(pubs_cntry_whole_wos_frac, -->
+<!-- #       digits = 2 -->
+<!-- #       ) -->
+<!-- # kable(pubs_cntry_whole_wos_frac_ISI, -->
+<!-- #       digits = 2 -->
+<!-- #       ) -->
+<!-- ``` -->
+
+# Summing up
+
+The implications of the adapted counting method seems rather minor on the chosen analysis level of countries.
+
+Fractionation on the author level relies on complete information on the affiliations of single authors.
+
+In the WoS the share of items with incomplete records constantly constitutes a substantial part of the corpus. Although data quality has strongly improved since 2008, still for 2017 more than 10% of all articles and reviews are incomplete. Furthermore data quality apparently gets improved every year, but the rate of improvement has slowed down considerably in the last years.
+
+<!-- Socpus holds less incomplete recods, their share has been below 10% for all years since the first observation year 2007. -->
+
+Consequently fractionizing on the author level seems only reasonable on complete records, whereas incomplete records might be fractionoized on the *organization1* level. Both approaches could be improved via a wordwide institution harmonization, which has partially be done by ISI Karlsruhe for their EFI reports.
+
+
+```{r, teardown, include=FALSE}
+poolClose(sql_pool)
 ```
 
 
