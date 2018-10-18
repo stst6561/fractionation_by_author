@@ -13,6 +13,8 @@ Stephan Stahlschmidt and Marion Schmidt
     -   [Implementation in Scopus](#implementation-in-scopus)
     -   [Comparison](#comparison-1)
 -   [Summing up](#summing-up)
+-   [Appendix](#appendix)
+    -   [Conference Proceedings Web of Science](#conference-proceedings-web-of-science)
 -   [Literatur](#literatur)
 
 Motivation
@@ -104,7 +106,7 @@ Percentages of pk\_items with partially missing information:
 ![](README_files/figure-markdown_github/tab_friction-1.png)
 
 <!-- ```{r tab_dif_author_counting, echo = FALSE, eval = FALSE} -->
-<!-- # Differenz zwischen author_cnt und Zählung der fk_authors -->
+<!-- # Differenz zwischen author_cnt und ZÃ¤hlung der fk_authors -->
 <!-- dif_author_counting <- dbGetQuery(sql_pool, strwrap(paste0(" -->
 <!--   SELECT pubyear, SUM(diff) -->
 <!--   FROM( -->
@@ -127,7 +129,7 @@ Percentages of pk\_items with partially missing information:
 <!--   width = 100000, simplify = TRUE) -->
 <!--   ) -->
 <!-- ``` -->
-<!-- Prozentualer Anteil von pk_items mit Unterschieden in author_cnt und Zählung der zugehörigen fk_authors: -->
+<!-- Prozentualer Anteil von pk_items mit Unterschieden in author_cnt und ZÃ¤hlung der zugehÃ¶rigen fk_authors: -->
 <!-- ```{r tab_diff, echo = FALSE, eval = FALSE} -->
 <!-- tmp <- as.matrix(dif_author_counting[,2]/papersByYear[,2] * 100) -->
 <!-- rownames(tmp) <- as.character(2007:2017) -->
@@ -354,7 +356,7 @@ Only Italy and Korea swap places in this ranking of productivity.
 Scopus: scopus\_b\_2017
 =======================
 
-Die Datenqualität von Scopus erscheint signifikant besser zu sein, und zwar für den aktuellen Rand als auch insbesondere für vergangene Jahre.
+Die DatenqualitÃ¤t von Scopus erscheint signifikant besser zu sein, und zwar fÃ¼r den aktuellen Rand als auch insbesondere fÃ¼r vergangene Jahre.
 
 Prozentualer Anteil von pk\_items mit fehlenden Informationen (Scopus):
 
@@ -374,7 +376,7 @@ Prozentualer Anteil von pk\_items mit fehlenden Informationen (Scopus):
 ![](README_files/figure-markdown_github/tab_friction_sc-1.png)
 
 <!-- ```{r, tab_dif_author_counting_sc, echo=FALSE, eval=FALSE} -->
-<!-- # Differenz zwischen author_cnt und Zählung der fk_authors -->
+<!-- # Differenz zwischen author_cnt und ZÃ¤hlung der fk_authors -->
 <!-- dif_author_counting_sc <- dbGetQuery(sql_pool, strwrap(paste0(" -->
 <!--   SELECT pubyear, SUM(diff) -->
 <!--   FROM( -->
@@ -396,7 +398,7 @@ Prozentualer Anteil von pk\_items mit fehlenden Informationen (Scopus):
 <!--   width = 100000, simplify = TRUE) -->
 <!--   ) -->
 <!-- ``` -->
-<!-- Prozentualer Anteil von pk_items mit Unterschieden in author_cnt und Zählung der zugehörigen fk_authors (Scopus): -->
+<!-- Prozentualer Anteil von pk_items mit Unterschieden in author_cnt und ZÃ¤hlung der zugehÃ¶rigen fk_authors (Scopus): -->
 <!-- ```{r, tab_diff_sc, echo=FALSE, eval=FALSE, cache=FALSE} -->
 <!-- tmp <- as.matrix(dif_author_counting_sc[,2]/papersByYear_sc[,2] * 100) -->
 <!-- rownames(tmp) <- as.character(2007:2016) -->
@@ -612,6 +614,121 @@ In the WoS the share of items with incomplete records constantly constitutes a s
 Socpus holds less incomplete recods, their share has been below 10% for all years since the first observation year 2007.
 
 Consequently fractionizing on the author level seems only reasonable on complete records, whereas incomplete records might be fractionoized on the *organization1* level. Both approaches could be improved via a wordwide institution harmonization, which has partially be done by ISI Karlsruhe for their EFI reports.
+
+Appendix
+========
+
+Conference Proceedings Web of Science
+-------------------------------------
+
+Percentages of pk\_items with partially missing information:
+
+|      | only pk\_item |  no type|  no role|  no affiliation|  no author|  No Organization1|  total|
+|------|:-------------:|--------:|--------:|---------------:|----------:|-----------------:|------:|
+| 2007 |       0       |        0|     15.0|            23.8|       15.0|               0.2|   24.1|
+| 2008 |       0       |        0|      8.8|            19.5|        8.8|               0.2|   19.7|
+| 2009 |       0       |        0|      8.7|            19.3|        8.7|               0.2|   19.5|
+| 2010 |       0       |        0|      7.5|            17.4|        7.5|               0.2|   17.6|
+| 2011 |       0       |        0|      7.1|            14.8|        7.1|               0.3|   15.1|
+| 2012 |       0       |        0|      7.1|            18.1|        7.1|               0.3|   18.4|
+| 2013 |       0       |        0|      6.9|            15.9|        6.9|               0.3|   16.1|
+| 2014 |       0       |        0|      7.0|            11.0|        7.0|               0.2|   11.2|
+| 2015 |       0       |        0|      3.1|             4.7|        3.1|               0.2|    4.9|
+| 2016 |       0       |        0|      1.0|             2.2|        1.0|               0.3|    2.7|
+| 2017 |       0       |        0|      0.9|             1.8|        0.9|               0.2|    2.3|
+
+![](README_files/figure-markdown_github/cp_tab_friction-1.png)
+
+Implementation:
+
+``` sql
+
+/*
+populate temporary table
+*/
+INSERT INTO items_iai_complete (
+SELECT DISTINCT tmp.fk_items -- subset of items with complete iai information
+FROM( -- counts numbers of entries in iai for every item
+    SELECT fk_items, COUNT (*) AS entry_cnt
+    FROM wos_b_2018.items it
+    LEFT JOIN wos_b_2018.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
+    LEFT JOIN wos_b_2018.institutions inst ON inst.pk_institutions = iai.fk_institutions
+    WHERE (role IS NULL OR role = 'author') -- we only care for authors and missing information, other roles are neglected
+        AND doctype = 'Proceedings Paper'
+        AND pubyear BETWEEN 2007 AND 2017
+    GROUP BY fk_items
+) tmp
+JOIN( -- counts numbers of COMPLETE entries in iai for every item
+    SELECT fk_items, COUNT (*) AS entry_cnt
+    FROM wos_b_2018.items it
+    LEFT JOIN wos_b_2018.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
+    LEFT JOIN wos_b_2018.institutions inst ON inst.pk_institutions = iai.fk_institutions
+    WHERE doctype = 'Proceedings Paper'
+        AND pubyear BETWEEN 2007 AND 2017
+        AND fk_institutions IS NOT NULL
+        AND fk_authors IS NOT NULL
+        AND role = 'author'
+        AND type IS NOT NULL
+    GROUP BY fk_items
+) tmp2 ON tmp.fk_items = tmp2.fk_items
+AND tmp.entry_cnt = tmp2.entry_cnt); -- compare both numbers
+
+/*
+include items with COMPLETE iai information via fractional counting on author level:
+*/
+INSERT INTO wosb2018_frc_cntrylvl
+SELECT fk_items, countrycode, SUM(orga_frak) AS frac_share, 1 -- aggregating on country level
+FROM( -- aggregating on organization1 level
+    SELECT fk_items, organization1, countrycode, SUM(orga_share)  AS orga_frak
+    FROM( -- computing fractional contribution of organsation on author level
+      SELECT DISTINCT fk_items, ORGANIZATION1, countrycode, fk_authors,
+        (1/(COUNT (DISTINCT fk_authors) OVER (PARTITION BY fk_items)))
+        /(COUNT (DISTINCT organization1) OVER (PARTITION BY fk_items, fk_authors)) AS orga_share
+      FROM wos_b_2018.items it
+      JOIN wos_b_2018.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
+      JOIN wos_b_2018.institutions inst ON inst.pk_institutions = iai.fk_institutions
+      WHERE doctype = 'Proceedings Paper'
+        AND pubyear BETWEEN 2007 AND 2017
+        AND role = 'author'
+        AND type = 'RS'
+        AND pk_items IN (SELECT fk_items FROM items_iai_complete)
+        AND organization1 IS NOT NULL
+      )
+    GROUP BY fk_items, organization1, countrycode
+)
+GROUP BY fk_items, countrycode, 1;
+
+/*
+include items with INCOMPLETE iai information via fractional counting on organization level:
+*/
+INSERT INTO wosb2018_frc_cntrylvl
+SELECT fk_items, countrycode, SUM(orga_frak) AS frac_share, 0 -- aggregating on country level
+FROM( -- aggregating on organization1 level
+    SELECT fk_items, organization1, countrycode, SUM(orga_share)  AS orga_frak
+    FROM( -- computing fractional contribution on organisation level
+      SELECT DISTINCT fk_items, ORGANIZATION1, countrycode,
+        (1/(COUNT (DISTINCT organization1) OVER (PARTITION BY fk_items))) AS orga_share
+      FROM wos_b_2018.items it
+      JOIN wos_b_2018.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
+      JOIN wos_b_2018.institutions inst ON inst.pk_institutions = iai.fk_institutions
+      WHERE doctype = 'Proceedings Paper'
+        AND pubyear BETWEEN 2007 AND 2017
+        AND (role = 'author' OR role IS NULL)
+        AND type = 'RS'
+        AND pk_items NOT IN (SELECT fk_items FROM items_iai_complete)
+        AND organization1 IS NOT NULL
+      )
+    GROUP BY fk_items, organization1, countrycode
+)
+GROUP BY fk_items, countrycode, 0;
+
+COMMIT;
+
+DROP INDEX wosb2018_frc_cntrylvl_ix
+CREATE INDEX wosb2018_frc_cntrylvl_ix ON wosb2018_frc_cntrylvl (fk_items, countrycode);
+
+COMMIT;
+```
 
 Literatur
 =========
