@@ -1,7 +1,7 @@
 Fraktionierung auf Autorenebene
 ================
 Stephan Stahlschmidt and Marion Schmidt
-16 Oktober, 2018
+18 Oktober, 2018
 
 -   [Motivation](#motivation)
 -   [Potential Solution](#potential-solution)
@@ -9,6 +9,9 @@ Stephan Stahlschmidt and Marion Schmidt
 -   [Implementation](#implementation)
 -   [Caveats](#caveats)
 -   [Comparison](#comparison)
+-   [Scopus: scopus\_b\_2017](#scopus-scopus_b_2017)
+    -   [Implementation in Scopus](#implementation-in-scopus)
+    -   [Comparison](#comparison-1)
 -   [Summing up](#summing-up)
 -   [Literatur](#literatur)
 
@@ -101,7 +104,7 @@ Percentages of pk\_items with partially missing information:
 ![](README_files/figure-markdown_github/tab_friction-1.png)
 
 <!-- ```{r tab_dif_author_counting, echo = FALSE, eval = FALSE} -->
-<!-- # Differenz zwischen author_cnt und ZÃ¤hlung der fk_authors -->
+<!-- # Differenz zwischen author_cnt und Zählung der fk_authors -->
 <!-- dif_author_counting <- dbGetQuery(sql_pool, strwrap(paste0(" -->
 <!--   SELECT pubyear, SUM(diff) -->
 <!--   FROM( -->
@@ -124,7 +127,7 @@ Percentages of pk\_items with partially missing information:
 <!--   width = 100000, simplify = TRUE) -->
 <!--   ) -->
 <!-- ``` -->
-<!-- Prozentualer Anteil von pk_items mit Unterschieden in author_cnt und ZÃ¤hlung der zugehÃ¶rigen fk_authors: -->
+<!-- Prozentualer Anteil von pk_items mit Unterschieden in author_cnt und Zählung der zugehörigen fk_authors: -->
 <!-- ```{r tab_diff, echo = FALSE, eval = FALSE} -->
 <!-- tmp <- as.matrix(dif_author_counting[,2]/papersByYear[,2] * 100) -->
 <!-- rownames(tmp) <- as.character(2007:2017) -->
@@ -314,7 +317,7 @@ FROM( -- aggregating on organization1 level
 )
 GROUP BY fk_items, countrycode;
 
-CREATE INDEX wosb2018_frc_cntrylvl_org1_idx ON wosb2018_frc_cntrylvl_org1 (fk_items, countrycode);
+CREATE INDEX wosb2018_frc_cntrylvl_org1_ix ON wosb2018_frc_cntrylvl_org1 (fk_items, countrycode);
 
 COMMIT;
 ```
@@ -348,182 +351,30 @@ Computing fractional counts of publications on national level for 2017:
 
 Only Italy and Korea swap places in this ranking of productivity.
 
-<!-- # Scopus: scopus_b_2017 -->
-<!-- Die DatenqualitÃ¤t von Scopus erscheint signifikant besser zu sein, und zwar fÃ¼r den aktuellen Rand als auch insbesondere fÃ¼r vergangene Jahre. -->
-<!-- ```{r, echo=FALSE} -->
-<!-- # Article und Review pro Jahr -->
-<!-- papersByYear_sc <- dbGetQuery(sql_pool, strwrap(paste0(" -->
-<!--   SELECT pubyear, COUNT(DISTINCT pk_items) -->
-<!--   FROM scopus_b_2017.items it -->
-<!--   WHERE pubtype = 'J' -->
-<!--   AND doctype IN ('ar', 're') -->
-<!--     AND pubyear BETWEEN 2007 AND 2016 -->
-<!--   GROUP BY pubyear -->
-<!--   ORDER BY pubyear ASC -->
-<!--   "), -->
-<!--   width = 100000, simplify = TRUE) -->
-<!--   ) -->
-<!-- ``` -->
-<!-- ```{r, echo=FALSE} -->
-<!-- # inner vs left join between items and items_authors_institutions -->
-<!-- outerInneDiff_sc <- dbGetQuery(sql_pool, strwrap(paste0(" -->
-<!-- SELECT tmp1.pubyear, (tmp2.count_outer - tmp1.count_inner) AS pub_diff -->
-<!--   FROM( -->
-<!--     SELECT pubyear, COUNT(DISTINCT iai.fk_items) count_inner -->
-<!--     FROM scopus_b_2017.items it -->
-<!--     JOIN scopus_b_2017.items_authors_institutions iai ON it.pk_items=iai.fk_items -->
-<!--     WHERE pubtype = 'J' -->
-<!--       AND doctype IN ('ar', 're') -->
-<!--       AND pubyear BETWEEN 2007 AND 2016 -->
-<!--     GROUP BY pubyear) tmp1 -->
-<!--   JOIN( -->
-<!--     SELECT pubyear, COUNT(DISTINCT iai.fk_items) count_outer -->
-<!--     FROM scopus_b_2017.items it -->
-<!--     LEFT JOIN scopus_b_2017.items_authors_institutions iai ON it.pk_items=iai.fk_items -->
-<!--     WHERE pubtype = 'J' -->
-<!--       AND doctype IN ('ar', 're') -->
-<!--       AND pubyear BETWEEN 2007 AND 2016 -->
-<!--     GROUP BY pubyear) tmp2 ON tmp1.pubyear = tmp2.pubyear -->
-<!--   ORDER BY tmp1.pubyear ASC -->
-<!--   "), -->
-<!--   width = 100000, simplify = TRUE) -->
-<!--   )  -->
-<!-- ``` -->
-<!-- ```{r, echo=FALSE} -->
-<!-- # Article und Review mit fk_authors als NULL -->
-<!-- paperNullAuthor_sc <- dbGetQuery(sql_pool, strwrap(paste0(" -->
-<!--   SELECT pubyear, COUNT(DISTINCT fk_items) -->
-<!--   FROM scopus_b_2017.items it -->
-<!--   JOIN scopus_b_2017.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items -->
-<!--   WHERE fk_authors IS NULL -->
-<!--     AND pubtype = 'J' -->
-<!--     AND doctype IN ('ar', 're') -->
-<!--     AND pubyear BETWEEN 2007 AND 2016 -->
-<!--     AND (type = 'RS' OR type IS NULL) -->
-<!--   GROUP BY pubyear -->
-<!--   ORDER BY pubyear ASC -->
-<!--   "), -->
-<!--   width = 100000, simplify = TRUE) -->
-<!--   ) -->
-<!-- ``` -->
-<!-- ```{r, echo=FALSE} -->
-<!-- # Article und Review mit fk_institutions als NULL -->
-<!-- paperNullInstitution_sc <- dbGetQuery(sql_pool, strwrap(paste0(" -->
-<!--   SELECT pubyear, COUNT(DISTINCT fk_items) -->
-<!--   FROM scopus_b_2017.items it -->
-<!--   JOIN scopus_b_2017.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items -->
-<!--   WHERE fk_institutions IS NULL -->
-<!--     AND pubtype = 'J' -->
-<!--     AND doctype IN ('ar', 're') -->
-<!--     AND pubyear BETWEEN 2007 AND 2016 -->
-<!--     AND (type = 'RS' OR type IS NULL) -->
-<!--   GROUP BY pubyear -->
-<!--   ORDER BY pubyear ASC -->
-<!--   "), -->
-<!--   width = 100000, simplify = TRUE) -->
-<!--   ) -->
-<!-- ``` -->
-<!-- ```{r, echo=FALSE} -->
-<!-- # article or review with no information on type -->
-<!-- paperNullType_sc <- dbGetQuery(sql_pool, strwrap(paste0(" -->
-<!--   SELECT pubyear, COUNT(DISTINCT fk_items) -->
-<!--   FROM scopus_b_2017.items it -->
-<!--   JOIN scopus_b_2017.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items -->
-<!--   WHERE type IS NULL -->
-<!--     AND pubtype = 'J' -->
-<!--     AND doctype IN ('ar', 're') -->
-<!--     AND pubyear BETWEEN 2007 AND 2016 -->
-<!--   GROUP BY pubyear -->
-<!--   ORDER BY pubyear ASC -->
-<!--   "), -->
-<!--   width = 100000, simplify = TRUE) -->
-<!--   ) -->
-<!-- if(dim(paperNullType_sc)[1]==0){ -->
-<!--   paperNullType_sc <- matrix(NA, nrow = length(2007:2016), ncol = 2) -->
-<!--   paperNullType_sc[,1] <- 2007:2016 -->
-<!--   paperNullType_sc[,2] <- 0 -->
-<!-- } -->
-<!-- ``` -->
-<!-- ```{r, echo=FALSE} -->
-<!-- # article or review with no information on organization1 -->
-<!-- paperNullorganization1_sc <- dbGetQuery(sql_pool, strwrap(paste0(" -->
-<!--   SELECT pubyear, COUNT(DISTINCT fk_items) -->
-<!--   FROM scopus_b_2017.items it -->
-<!--   JOIN scopus_b_2017.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items -->
-<!--   JOIN scopus_b_2017.institutions inst ON inst.pk_institutions = iai.fk_institutions -->
-<!--   WHERE organization1 IS NULL -->
-<!--     AND pubtype = 'J' -->
-<!--     AND doctype IN ('ar', 're') -->
-<!--     AND pubyear BETWEEN 2007 AND 2016 -->
-<!--   GROUP BY pubyear -->
-<!--   ORDER BY pubyear ASC -->
-<!--   "), -->
-<!--   width = 100000, simplify = TRUE) -->
-<!--   ) -->
-<!-- ``` -->
-<!-- ```{r, echo=FALSE} -->
-<!-- # all potential missing information jointly -->
-<!-- paperOverall_sc <- dbGetQuery(sql_pool, strwrap(paste0(" -->
-<!--   SELECT pubyear, COUNT(pk_items) -->
-<!--   FROM( -->
-<!--   SELECT DISTINCT pubyear, pk_items -->
-<!--   FROM scopus_b_2017.items it -->
-<!--   JOIN scopus_b_2017.items_authors_institutions iai ON it.pk_items = iai.fk_items -->
-<!--   WHERE pubtype = 'J' -->
-<!--     AND doctype IN ('ar', 're') -->
-<!--     AND pubyear BETWEEN 2007 AND 2016 -->
-<!--     AND ((fk_institutions IS NULL -->
-<!--           AND (type = 'RS' OR type IS NULL)) OR -->
-<!--         (fk_authors IS NULL -->
-<!--           AND (type = 'RS' OR type IS NULL)) OR -->
-<!--         (type IS NULL)) -->
-<!--   UNION -->
-<!--   SELECT DISTINCT pubyear,  pk_items -->
-<!--   FROM scopus_b_2017.items it -->
-<!--   JOIN scopus_b_2017.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items -->
-<!--   JOIN scopus_b_2017.institutions inst ON inst.pk_institutions = iai.fk_institutions -->
-<!--   WHERE organization1 IS NULL -->
-<!--     AND pubtype = 'J' -->
-<!--     AND doctype IN ('ar', 're') -->
-<!--     AND pubyear BETWEEN 2007 AND 2016 -->
-<!--   ) -->
-<!--   GROUP BY pubyear -->
-<!--   ORDER BY pubyear ASC  "), -->
-<!--   width = 100000, simplify = TRUE) -->
-<!--   ) -->
-<!-- ``` -->
-<!-- Prozentualer Anteil von pk_items mit fehlenden Informationen (Scopus): -->
-<!-- ```{r, tab_friction_sc, echo=FALSE, cache=FALSE} -->
-<!-- tab_friction_sc <- as.matrix(cbind(outerInneDiff_sc[,2]/papersByYear_sc[,2], -->
-<!--                                 paperNullType_sc[,2]/papersByYear_sc[,2], -->
-<!--                                 paperNullInstitution_sc[,2]/papersByYear_sc[,2], -->
-<!--                                 paperNullAuthor_sc[,2]/papersByYear_sc[,2], -->
-<!--                                 paperNullorganization1_sc/papersByYear_sc[,2], -->
-<!--                                 (paperOverall_sc[,2] + outerInneDiff_sc[,2])/papersByYear_sc[,2])*100) -->
-<!-- colnames(tab_friction_sc) <- c("no author nor affiliation", -->
-<!--                             "no author type", -->
-<!--                             "author w/o affiliation", -->
-<!--                             "affiliation w/o authors", -->
-<!--                             "no organization1", -->
-<!--                             "total") -->
-<!-- rownames(tab_friction_sc) <- as.character(2007:2016) -->
-<!-- kable(tab_friction_sc, -->
-<!--       digits = 1 -->
-<!--       ) -->
-<!-- matplot(2007:2016, tab_friction_sc, -->
-<!--      xlim=c(2007,2016), -->
-<!--      ylim=c(0,100), -->
-<!--      lwd=2, -->
-<!--      lty = 1, -->
-<!--      bty="n", -->
-<!--      xlab="", -->
-<!--      ylab="%", -->
-<!--      type="l", -->
-<!--      col = rev(viridis(6))) -->
-<!-- legend("topright", legend = rev(colnames(tab_friction)), fill=viridis(6), bty = "n") -->
-<!-- ``` -->
+Scopus: scopus\_b\_2017
+=======================
+
+Die Datenqualität von Scopus erscheint signifikant besser zu sein, und zwar für den aktuellen Rand als auch insbesondere für vergangene Jahre.
+
+Prozentualer Anteil von pk\_items mit fehlenden Informationen (Scopus):
+
+|      |  no author nor affiliation|  no author type|  author w/o affiliation|  affiliation w/o authors|  no organization1|  total|
+|------|--------------------------:|---------------:|-----------------------:|------------------------:|-----------------:|------:|
+| 2007 |                          0|               0|                     5.7|                      0.0|               2.5|    7.9|
+| 2008 |                          0|               0|                     5.0|                      0.0|               2.4|    7.1|
+| 2009 |                          0|               0|                     5.0|                      0.0|               2.1|    6.9|
+| 2010 |                          0|               0|                     6.1|                      0.0|               2.1|    7.9|
+| 2011 |                          0|               0|                     5.7|                      0.0|               2.1|    7.5|
+| 2012 |                          0|               0|                     5.3|                      0.0|               1.9|    7.0|
+| 2013 |                          0|               0|                     4.8|                      0.0|               1.8|    6.4|
+| 2014 |                          0|               0|                     3.8|                      0.1|               1.9|    5.5|
+| 2015 |                          0|               0|                     3.2|                      0.3|               1.9|    5.1|
+| 2016 |                          0|               0|                     2.1|                      0.3|               1.9|    3.9|
+
+![](README_files/figure-markdown_github/tab_friction_sc-1.png)
+
 <!-- ```{r, tab_dif_author_counting_sc, echo=FALSE, eval=FALSE} -->
-<!-- # Differenz zwischen author_cnt und ZÃ¤hlung der fk_authors -->
+<!-- # Differenz zwischen author_cnt und Zählung der fk_authors -->
 <!-- dif_author_counting_sc <- dbGetQuery(sql_pool, strwrap(paste0(" -->
 <!--   SELECT pubyear, SUM(diff) -->
 <!--   FROM( -->
@@ -545,7 +396,7 @@ Only Italy and Korea swap places in this ranking of productivity.
 <!--   width = 100000, simplify = TRUE) -->
 <!--   ) -->
 <!-- ``` -->
-<!-- Prozentualer Anteil von pk_items mit Unterschieden in author_cnt und ZÃ¤hlung der zugehÃ¶rigen fk_authors (Scopus): -->
+<!-- Prozentualer Anteil von pk_items mit Unterschieden in author_cnt und Zählung der zugehörigen fk_authors (Scopus): -->
 <!-- ```{r, tab_diff_sc, echo=FALSE, eval=FALSE, cache=FALSE} -->
 <!-- tmp <- as.matrix(dif_author_counting_sc[,2]/papersByYear_sc[,2] * 100) -->
 <!-- rownames(tmp) <- as.character(2007:2016) -->
@@ -568,201 +419,187 @@ Only Italy and Korea swap places in this ranking of productivity.
 <!-- #        fill=viridis(2), -->
 <!-- #        bty = "n") -->
 <!-- ``` -->
-<!-- ## Implementation in Scopus -->
-<!-- ```sql -->
-<!-- DROP TABLE items_iai_complete_scp; -->
-<!-- DROP TABLE scopusb2017_frc_cntrylvl; -->
-<!-- /* -->
-<!-- Create temporaray table as an indicator of items with complete iai record: -->
-<!-- */ -->
-<!-- CREATE GLOBAL TEMPORARY TABLE items_iai_complete_scp ( -->
-<!--     fk_items NUMBER -->
-<!-- ) -->
-<!-- ON COMMIT DELETE ROWS; -->
-<!-- /* -->
-<!-- create empty table defining fractional weight for every paper by country -->
-<!-- causes implicit commit -->
-<!-- */ -->
-<!-- CREATE TABLE scopusb2017_frc_cntrylvl ( -->
-<!--     fk_items NUMBER, -->
-<!--     countrycode VARCHAR2(10 CHAR), -->
-<!--     frac_share NUMBER(3,2), -->
-<!--     ind_complete NUMBER(1,0) -->
-<!-- ); -->
-<!-- /* -->
-<!-- populate temporary table -->
-<!-- */ -->
-<!-- INSERT INTO items_iai_complete_scp ( -->
-<!-- SELECT DISTINCT tmp.fk_items -- subset of items with complete iai information -->
-<!-- FROM( -- counts numbers of entries in iai for every item -->
-<!--     SELECT fk_items, COUNT (*) AS entry_cnt -->
-<!--     FROM scopus_b_2017.items it -->
-<!--     LEFT JOIN scopus_b_2017.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items -->
-<!--     LEFT JOIN scopus_b_2017.institutions inst ON inst.pk_institutions = iai.fk_institutions -->
-<!--     WHERE pubtype = 'J' -->
-<!--         AND doctype IN ('ar', 're') -->
-<!--         AND pubyear BETWEEN 2007 AND 2016 -->
-<!--     GROUP BY fk_items -->
-<!-- ) tmp -->
-<!-- JOIN( -- counts numbers of COMPLETE entries in iai for every item -->
-<!--     SELECT fk_items, COUNT (*) AS entry_cnt -->
-<!--     FROM scopus_b_2017.items it -->
-<!--     LEFT JOIN scopus_b_2017.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items -->
-<!--     LEFT JOIN scopus_b_2017.institutions inst ON inst.pk_institutions = iai.fk_institutions -->
-<!--     WHERE pubtype = 'J' -->
-<!--         AND doctype IN ('ar', 're') -->
-<!--         AND pubyear BETWEEN 2007 AND 2016 -->
-<!--         AND fk_institutions IS NOT NULL -->
-<!--         AND fk_authors IS NOT NULL -->
-<!--         AND type IS NOT NULL -->
-<!--     GROUP BY fk_items -->
-<!-- ) tmp2 ON tmp.fk_items = tmp2.fk_items -->
-<!-- AND tmp.entry_cnt = tmp2.entry_cnt); -- compare both numbers -->
-<!-- /* -->
-<!-- include items with COMPLETE iai information via fractional counting on author level: -->
-<!-- */ -->
-<!-- INSERT INTO scopusb2017_frc_cntrylvl -->
-<!-- SELECT fk_items, countrycode, SUM(orga_frak) AS frac_share, 1 -- aggregating on country level -->
-<!-- FROM( -- aggregating on organization1 level -->
-<!--     SELECT fk_items, organization1, countrycode, SUM(orga_share)  AS orga_frak -->
-<!--     FROM( -- computing fractional contribution of organsation on author level -->
-<!--       SELECT DISTINCT fk_items, ORGANIZATION1, countrycode, fk_authors, -->
-<!--         (1/(COUNT (DISTINCT fk_authors) OVER (PARTITION BY fk_items)))/(COUNT (DISTINCT organization1) OVER (PARTITION BY fk_items, fk_authors)) AS orga_share -->
-<!--       FROM scopus_b_2017.items it -->
-<!--       JOIN scopus_b_2017.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items -->
-<!--       JOIN scopus_b_2017.institutions inst ON inst.pk_institutions = iai.fk_institutions -->
-<!--       WHERE pubtype = 'J' -->
-<!--         AND doctype IN ('ar', 're') -->
-<!--         AND pubyear BETWEEN 2007 AND 2016 -->
-<!--         AND type = 'RS' -->
-<!--         AND pk_items IN (SELECT fk_items FROM items_iai_complete_scp) -->
-<!--         AND organization1 IS NOT NULL -->
-<!--       ) -->
-<!--     GROUP BY fk_items, organization1, countrycode -->
-<!-- ) -->
-<!-- GROUP BY fk_items, countrycode, 1; -->
-<!-- /* -->
-<!-- include items with INCOMPLETE iai information via fractional counting on organization level: -->
-<!-- */ -->
-<!-- INSERT INTO scopusb2017_frc_cntrylvl -->
-<!-- SELECT fk_items, countrycode, SUM(orga_frak) AS frac_share, 0 -- aggregating on country level -->
-<!-- FROM( -- aggregating on organization1 level -->
-<!--     SELECT fk_items, organization1, countrycode, SUM(orga_share)  AS orga_frak -->
-<!--     FROM( -- computing fractional contribution on organisation level -->
-<!--       SELECT DISTINCT fk_items, ORGANIZATION1, countrycode, -->
-<!--         (1/(COUNT (DISTINCT organization1) OVER (PARTITION BY fk_items))) AS orga_share -->
-<!--       FROM scopus_b_2017.items it -->
-<!--       JOIN scopus_b_2017.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items -->
-<!--       JOIN scopus_b_2017.institutions inst ON inst.pk_institutions = iai.fk_institutions -->
-<!--       WHERE pubtype = 'J' -->
-<!--         AND doctype IN ('ar', 're') -->
-<!--         AND pubyear BETWEEN 2007 AND 2016 -->
-<!--         AND type = 'RS' -->
-<!--         AND pk_items NOT IN (SELECT fk_items FROM items_iai_complete_scp) -->
-<!--         AND organization1 IS NOT NULL -->
-<!--       ) -->
-<!--     GROUP BY fk_items, organization1, countrycode -->
-<!-- ) -->
-<!-- GROUP BY fk_items, countrycode, 0; -->
-<!-- CREATE INDEX wosb2018_frc_cntrylvl_ix ON wosb2018_frc_cntrylvl (fk_items, countrycode); -->
-<!-- COMMIT; -->
-<!-- ``` -->
-<!-- ## Comparison -->
-<!-- As an alternative implementation we also compute weights based on fractionation on the *organization1* level: -->
-<!-- ```sql -->
-<!-- /* -->
-<!-- create empty table defining fractional weight for every paper by country -->
-<!-- based on fractionation on organization1 level -->
-<!-- */ -->
-<!-- CREATE TABLE scopusb2017_frc_cntrylvl_org1 ( -->
-<!--     fk_items NUMBER, -->
-<!--     countrycode VARCHAR2(10 CHAR), -->
-<!--     frac_share NUMBER(3,2) -->
-<!-- ); -->
-<!-- /* -->
-<!-- include items with INCOMPLETE iai information via fractional counting on organization level: -->
-<!-- */ -->
-<!-- INSERT INTO scopusb2017_frc_cntrylvl_org1 -->
-<!-- SELECT fk_items, countrycode, SUM(orga_frak) AS frac_share -- aggregating on country level -->
-<!-- FROM( -- aggregating on organization1 level -->
-<!--     SELECT fk_items, organization1, countrycode, SUM(orga_share)  AS orga_frak -->
-<!--     FROM( -- computing fractional contribution on organisation level -->
-<!--       SELECT DISTINCT fk_items, ORGANIZATION1, countrycode, -->
-<!--         (1/(COUNT (DISTINCT organization1) OVER (PARTITION BY fk_items))) AS orga_share -->
-<!--       FROM scopus_b_2017.items it -->
-<!--       JOIN scopus_b_2017.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items -->
-<!--       JOIN scopus_b_2017.institutions inst ON inst.pk_institutions = iai.fk_institutions -->
-<!--       WHERE pubtype = 'J' -->
-<!--         AND doctype IN ('ar', 're') -->
-<!--         AND pubyear BETWEEN 2007 AND 2016 -->
-<!--         AND type = 'RS' -->
-<!--         AND organization1 IS NOT NULL -->
-<!--       ) -->
-<!--     GROUP BY fk_items, organization1, countrycode -->
-<!-- ) -->
-<!-- GROUP BY fk_items, countrycode; -->
-<!-- CREATE INDEX wosb2017_frc_cntrylvl_org1_scp_idx ON wosb2018_frc_cntrylvl_org1_scp (fk_items, countrycode); -->
-<!-- COMMIT; -->
-<!-- ``` -->
-<!-- Computing fractional counts of publications on national level for 2016: -->
-<!-- ```{r, testing_scp, echo=FALSE, cache=TRUE} -->
-<!-- # hybrid approach -->
-<!-- pubs_cntry_whole_wos_frac_scp <- dbGetQuery(sql_pool, strwrap(paste0(" -->
-<!--     SELECT country, pubyear, SUM(frac_share) pub_cnt_frak -->
-<!--     FROM( -->
-<!--       SELECT DISTINCT it.pubyear, inst.countrycode country, it.pk_items, frak.frac_share -->
-<!--       FROM scopus_b_2017.items it -->
-<!--       JOIN scopus_b_2017.items_authors_institutions iai ON it.pk_items=iai.fk_items -->
-<!--       JOIN scopus_b_2017.institutions inst ON inst.pk_institutions=iai.fk_institutions -->
-<!--       JOIN scopusb2018_frc_cntrylvl frak ON frak.fk_items = it.pk_items -->
-<!--         AND frak.countrycode = inst.countrycode -->
-<!--       WHERE it.pubyear = 2016 -->
-<!--         AND it.doctype IN ('ar','re') -->
-<!--         AND it.pubtype = 'J' -->
-<!--         AND inst.countrycode IN ('AUT', 'BEL', 'BRA', 'CAN', 'CHE', 'CHN', 'DNK', 'DEU', 'ESP', 'FIN', 'FRA',  -->
-<!--                                    'GBR', 'IND', 'ISR', 'ITA', 'JPN', 'KOR', 'NLD', 'POL', 'RUS', 'SWE', 'USA', 'ZAF') -->
-<!--     ) -->
-<!--     GROUP BY country, pubyear -->
-<!--     ORDER BY pub_cnt_frak DESC -->
-<!--     "), -->
-<!--     width = 100000, simplify=TRUE) -->
-<!-- ) -->
-<!-- # ISI approach -->
-<!-- pubs_cntry_whole_wos_frac_ISI_scp <- dbGetQuery(sql_pool, strwrap(paste0(" -->
-<!--     SELECT country, pubyear, SUM(frac_share) pub_cnt_frak_ISI -->
-<!--     FROM( -->
-<!--       SELECT DISTINCT it.pubyear, inst.countrycode country, it.pk_items, frak.frac_share -->
-<!--       FROM scopus_b_2017.items it -->
-<!--       JOIN scopus_b_2017.items_authors_institutions iai ON it.pk_items=iai.fk_items -->
-<!--       JOIN scopus_b_2017.institutions inst ON inst.pk_institutions=iai.fk_institutions -->
-<!--       JOIN scopusb2017_frc_cntrylvl_org1 frak ON frak.fk_items = it.pk_items -->
-<!--         AND frak.countrycode = inst.countrycode -->
-<!--       WHERE it.pubyear = 2016 -->
-<!--         AND it.doctype IN ('ar','re') -->
-<!--         AND it.pubtype = 'J' -->
-<!--         AND inst.countrycode IN ('AUT', 'BEL', 'BRA', 'CAN', 'CHE', 'CHN', 'DNK', 'DEU', 'ESP', 'FIN', 'FRA',  -->
-<!--                                    'GBR', 'IND', 'ISR', 'ITA', 'JPN', 'KOR', 'NLD', 'POL', 'RUS', 'SWE', 'USA', 'ZAF') -->
-<!--     ) -->
-<!--     GROUP BY country, pubyear -->
-<!--     ORDER BY pub_cnt_frak_ISI DESC -->
-<!--     "), -->
-<!--     width = 100000, simplify=TRUE) -->
-<!-- ) -->
-<!-- ``` -->
-<!-- ```{r, echo=FALSE, cache=FALSE} -->
-<!-- # table -->
-<!-- pubs_cnt_compa <- cbind(pubs_cntry_whole_wos_frac_scp, pubs_cntry_whole_wos_frac_ISI_scp) -->
-<!-- print(pubs_cnt_compa) -->
-<!-- # kable(pubs_cnt_compa[1,3,4,6], -->
-<!-- #       digits = 2 -->
-<!-- #       ) -->
-<!-- # kable(pubs_cntry_whole_wos_frac, -->
-<!-- #       digits = 2 -->
-<!-- #       ) -->
-<!-- # kable(pubs_cntry_whole_wos_frac_ISI, -->
-<!-- #       digits = 2 -->
-<!-- #       ) -->
-<!-- ``` -->
+Implementation in Scopus
+------------------------
+
+``` sql
+DROP TABLE items_iai_complete_scp;
+DROP TABLE scopusb2017_frc_cntrylvl;
+
+/*
+Create temporaray table as an indicator of items with complete iai record:
+*/
+CREATE GLOBAL TEMPORARY TABLE items_iai_complete_scp (
+    fk_items NUMBER
+)
+ON COMMIT DELETE ROWS;
+
+/*
+create empty table defining fractional weight for every paper by country
+causes implicit commit
+*/
+CREATE TABLE scopusb2017_frc_cntrylvl (
+    fk_items NUMBER,
+    countrycode VARCHAR2(10 CHAR),
+    frac_share NUMBER(3,2),
+    ind_complete NUMBER(1,0)
+);
+
+/*
+populate temporary table
+*/
+INSERT INTO items_iai_complete_scp (
+SELECT DISTINCT tmp.fk_items -- subset of items with complete iai information
+FROM( -- counts numbers of entries in iai for every item
+    SELECT fk_items, COUNT (*) AS entry_cnt
+    FROM scopus_b_2017.items it
+    LEFT JOIN scopus_b_2017.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
+    LEFT JOIN scopus_b_2017.institutions inst ON inst.pk_institutions = iai.fk_institutions
+    WHERE pubtype = 'J'
+        AND doctype IN ('ar', 're')
+        AND pubyear BETWEEN 2007 AND 2016
+    GROUP BY fk_items
+) tmp
+JOIN( -- counts numbers of COMPLETE entries in iai for every item
+    SELECT fk_items, COUNT (*) AS entry_cnt
+    FROM scopus_b_2017.items it
+    LEFT JOIN scopus_b_2017.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
+    LEFT JOIN scopus_b_2017.institutions inst ON inst.pk_institutions = iai.fk_institutions
+    WHERE pubtype = 'J'
+        AND doctype IN ('ar', 're')
+        AND pubyear BETWEEN 2007 AND 2016
+        AND fk_institutions IS NOT NULL
+        AND fk_authors IS NOT NULL
+        AND type IS NOT NULL
+    GROUP BY fk_items
+) tmp2 ON tmp.fk_items = tmp2.fk_items
+AND tmp.entry_cnt = tmp2.entry_cnt); -- compare both numbers
+
+/*
+include items with COMPLETE iai information via fractional counting on author level:
+*/
+INSERT INTO scopusb2017_frc_cntrylvl
+SELECT fk_items, countrycode, SUM(orga_frak) AS frac_share, 1 -- aggregating on country level
+FROM( -- aggregating on organization1 level
+    SELECT fk_items, organization1, countrycode, SUM(orga_share)  AS orga_frak
+    FROM( -- computing fractional contribution of organsation on author level
+      SELECT DISTINCT fk_items, ORGANIZATION1, countrycode, fk_authors,
+        (1/(COUNT (DISTINCT fk_authors) OVER (PARTITION BY fk_items)))/(COUNT (DISTINCT organization1) OVER (PARTITION BY fk_items, fk_authors)) AS orga_share
+      FROM scopus_b_2017.items it
+      JOIN scopus_b_2017.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
+      JOIN scopus_b_2017.institutions inst ON inst.pk_institutions = iai.fk_institutions
+      WHERE pubtype = 'J'
+        AND doctype IN ('ar', 're')
+        AND pubyear BETWEEN 2007 AND 2016
+        AND type = 'RS'
+        AND pk_items IN (SELECT fk_items FROM items_iai_complete_scp)
+        AND organization1 IS NOT NULL
+      )
+    GROUP BY fk_items, organization1, countrycode
+)
+GROUP BY fk_items, countrycode, 1;
+
+/*
+include items with INCOMPLETE iai information via fractional counting on organization level:
+*/
+INSERT INTO scopusb2017_frc_cntrylvl
+SELECT fk_items, countrycode, SUM(orga_frak) AS frac_share, 0 -- aggregating on country level
+FROM( -- aggregating on organization1 level
+    SELECT fk_items, organization1, countrycode, SUM(orga_share)  AS orga_frak
+    FROM( -- computing fractional contribution on organisation level
+      SELECT DISTINCT fk_items, ORGANIZATION1, countrycode,
+        (1/(COUNT (DISTINCT organization1) OVER (PARTITION BY fk_items))) AS orga_share
+      FROM scopus_b_2017.items it
+      JOIN scopus_b_2017.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
+      JOIN scopus_b_2017.institutions inst ON inst.pk_institutions = iai.fk_institutions
+      WHERE pubtype = 'J'
+        AND doctype IN ('ar', 're')
+        AND pubyear BETWEEN 2007 AND 2016
+        AND type = 'RS'
+        AND pk_items NOT IN (SELECT fk_items FROM items_iai_complete_scp)
+        AND organization1 IS NOT NULL
+      )
+    GROUP BY fk_items, organization1, countrycode
+)
+GROUP BY fk_items, countrycode, 0;
+
+CREATE INDEX scpb2018_frc_cntrylvl_ix ON scopusb2017_frc_cntrylvl (fk_items, countrycode);
+
+COMMIT;
+```
+
+Comparison
+----------
+
+As an alternative implementation we also compute weights based on fractionation on the *organization1* level:
+
+``` sql
+
+/*
+create empty table defining fractional weight for every paper by country
+based on fractionation on organization1 level
+*/
+CREATE TABLE scopusb2017_frc_cntrylvl_org1 (
+    fk_items NUMBER,
+    countrycode VARCHAR2(10 CHAR),
+    frac_share NUMBER(3,2)
+);
+
+/*
+include items with INCOMPLETE iai information via fractional counting on organization level:
+*/
+INSERT INTO scopusb2017_frc_cntrylvl_org1
+SELECT fk_items, countrycode, SUM(orga_frak) AS frac_share -- aggregating on country level
+FROM( -- aggregating on organization1 level
+    SELECT fk_items, organization1, countrycode, SUM(orga_share)  AS orga_frak
+    FROM( -- computing fractional contribution on organisation level
+      SELECT DISTINCT fk_items, ORGANIZATION1, countrycode,
+        (1/(COUNT (DISTINCT organization1) OVER (PARTITION BY fk_items))) AS orga_share
+      FROM scopus_b_2017.items it
+      JOIN scopus_b_2017.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
+      JOIN scopus_b_2017.institutions inst ON inst.pk_institutions = iai.fk_institutions
+      WHERE pubtype = 'J'
+        AND doctype IN ('ar', 're')
+        AND pubyear BETWEEN 2007 AND 2016
+        AND type = 'RS'
+        AND organization1 IS NOT NULL
+      )
+    GROUP BY fk_items, organization1, countrycode
+)
+GROUP BY fk_items, countrycode;
+
+CREATE INDEX scpb2017_frc_cntrylvl_org1_idx ON scopusb2017_frc_cntrylvl_org1 (fk_items, countrycode);
+
+COMMIT;
+```
+
+Computing fractional counts of publications on national level for 2016:
+
+    ##    COUNTRY PUBYEAR PUB_CNT_FRAK COUNTRY PUBYEAR PUB_CNT_FRAK_ISI
+    ## 1      CHN    2016    342649.60     CHN    2016        338204.02
+    ## 2      USA    2016    333195.54     USA    2016        335849.18
+    ## 3      IND    2016     87121.46     IND    2016         86700.66
+    ## 4      GBR    2016     82915.05     GBR    2016         84107.96
+    ## 5      DEU    2016     77642.77     DEU    2016         77418.07
+    ## 6      JPN    2016     71628.66     JPN    2016         71793.26
+    ## 7      ITA    2016     54316.43     KOR    2016         53907.14
+    ## 8      KOR    2016     54093.73     FRA    2016         53757.73
+    ## 9      FRA    2016     52950.69     ITA    2016         53678.30
+    ## 10     CAN    2016     47786.34     CAN    2016         48078.08
+    ## 11     ESP    2016     46862.25     ESP    2016         46517.16
+    ## 12     BRA    2016     45468.12     BRA    2016         45066.48
+    ## 13     RUS    2016     44004.81     RUS    2016         44208.74
+    ## 14     NLD    2016     25578.36     NLD    2016         25380.92
+    ## 15     POL    2016     24674.90     POL    2016         24586.92
+    ## 16     CHE    2016     16855.87     CHE    2016         16936.08
+    ## 17     SWE    2016     16671.90     SWE    2016         16809.12
+    ## 18     BEL    2016     13405.68     BEL    2016         13273.06
+    ## 19     DNK    2016     11332.21     DNK    2016         11300.38
+    ## 20     ZAF    2016     10513.25     ZAF    2016         10538.46
+    ## 21     ISR    2016     10165.89     ISR    2016         10152.20
+    ## 22     AUT    2016      9151.00     AUT    2016          9140.63
+    ## 23     FIN    2016      8538.39     FIN    2016          8489.98
+
 Summing up
 ==========
 
