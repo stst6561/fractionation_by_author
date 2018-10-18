@@ -1052,7 +1052,7 @@ Fractionation on the author level relies on complete information on the affiliat
 
 In the WoS the share of items with incomplete records constantly constitutes a substantial part of the corpus. Although data quality has strongly improved since 2008, still for 2017 more than 10% of all articles and reviews are incomplete. Furthermore data quality apparently gets improved every year, but the rate of improvement has slowed down considerably in the last years.
 
-<!-- Socpus holds less incomplete recods, their share has been below 10% for all years since the first observation year 2007. -->
+Socpus holds less incomplete recods, their share has been below 10% for all years since the first observation year 2007.
 
 Consequently fractionizing on the author level seems only reasonable on complete records, whereas incomplete records might be fractionoized on the *organization1* level. Both approaches could be improved via a wordwide institution harmonization, which has partially be done by ISI Karlsruhe for their EFI reports.
 
