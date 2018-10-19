@@ -27,7 +27,7 @@ body {
 
 <h1 id="fraktionierung-auf-autorenebene">Fraktionierung auf Autorenebene</h1>
 <p>Stephan Stahlschmidt and Marion Schmidt<br />
-18 Oktober, 2018</p>
+19 Oktober, 2018</p>
 <ul>
 <li><a href="#motivation">Motivation</a></li>
 <li><a href="#potential-solution">Potential Solution</a></li>
@@ -43,6 +43,7 @@ body {
 <li><a href="#summing-up">Summing up</a></li>
 <li><a href="#appendix">Appendix</a>
 <ul>
+<li><a href="#kb-institution-encoding">KB institution encoding</a></li>
 <li><a href="#conference-proceedings-web-of-science">Conference Proceedings Web of Science</a></li>
 </ul></li>
 <li><a href="#literatur">Literatur</a></li>
@@ -718,6 +719,7 @@ body {
 <!-- #        bty = "n") -->
 <!-- ``` -->
 <h2 id="implementation-in-scopus">Implementation in Scopus</h2>
+<p><strong>Change to SCP affiliation encoding, as organization1 in scopus is of poor quality?</strong></p>
 <div class="sourceCode"><pre class="sourceCode sql"><code class="sourceCode sql"><span class="kw">DROP</span> <span class="kw">TABLE</span> items_iai_complete_scp;
 <span class="kw">DROP</span> <span class="kw">TABLE</span> scopusb2017_frc_cntrylvl;
 
@@ -892,6 +894,100 @@ body {
 <p>Socpus holds less incomplete recods, their share has been below 10% for all years since the first observation year 2007.</p>
 <p>Consequently fractionizing on the author level seems only reasonable on complete records, whereas incomplete records might be fractionoized on the <em>organization1</em> level. Both approaches could be improved via a wordwide institution harmonization, which has partially be done by ISI Karlsruhe for their EFI reports.</p>
 <h1 id="appendix">Appendix</h1>
+<h2 id="kb-institution-encoding">KB institution encoding</h2>
+<p>Fractionation weights are computed at the organiazation1 level (either with prior fractionation at the author level or due to incomplete information only on the organization1 level) and then transferred to the corresponding pk_kb_inst via the fk_institutions link. Consequently we assume that every pk_kb_inst constitutes a superset of organization1.</p>
+<h3 id="wos_b_2018">wos_b_2018</h3>
+<div class="sourceCode"><pre class="sourceCode sql"><code class="sourceCode sql"><span class="co">/*</span>
+<span class="co">create empty table defining fractional weight for every paper by country</span>
+<span class="co">causes implicit commit</span>
+<span class="co">*/</span>
+<span class="kw">CREATE</span> <span class="kw">TABLE</span> wosb2018_frc_kbinstlvl (
+    fk_items <span class="dt">NUMBER</span>,
+    fk_kb_inst <span class="dt">NUMBER</span>,
+    frac_share <span class="dt">NUMBER</span>(<span class="dv">3</span>,<span class="dv">2</span>),
+    ind_complete <span class="dt">NUMBER</span>(<span class="dv">1</span>,<span class="dv">0</span>)
+);
+
+<span class="co">/*</span>
+<span class="co">populate temporary table</span>
+<span class="co">*/</span>
+<span class="kw">INSERT</span> <span class="kw">INTO</span> items_iai_complete (
+<span class="kw">SELECT</span> <span class="kw">DISTINCT</span> tmp.fk_items <span class="co">-- subset of items with complete iai information</span>
+<span class="kw">FROM</span>( <span class="co">-- counts numbers of entries in iai for every item</span>
+    <span class="kw">SELECT</span> fk_items, <span class="fu">COUNT</span> (*) <span class="kw">AS</span> entry_cnt
+    <span class="kw">FROM</span> wos_b_2018.items it
+    <span class="kw">LEFT</span> <span class="kw">JOIN</span> wos_b_2018.ITEMS_AUTHORS_INSTITUTIONS iai <span class="kw">ON</span> it.pk_items = iai.fk_items
+    <span class="kw">LEFT</span> <span class="kw">JOIN</span> wos_b_2018.institutions inst <span class="kw">ON</span> inst.pk_institutions = iai.fk_institutions
+    <span class="kw">WHERE</span> (<span class="kw">role</span> <span class="kw">IS</span> <span class="kw">NULL</span> <span class="kw">OR</span> <span class="kw">role</span> = <span class="st">'author'</span>) <span class="co">-- we only care for authors and missing information, other roles are neglected</span>
+        <span class="kw">AND</span> pubtype = <span class="st">'Journal'</span>
+        <span class="kw">AND</span> doctype <span class="kw">IN</span> (<span class="st">'Article'</span>, <span class="st">'Review'</span>)
+        <span class="kw">AND</span> pubyear <span class="kw">BETWEEN</span> <span class="dv">2007</span> <span class="kw">AND</span> <span class="dv">2017</span>
+    <span class="kw">GROUP</span> <span class="kw">BY</span> fk_items
+) tmp
+<span class="kw">JOIN</span>( <span class="co">-- counts numbers of COMPLETE entries in iai for every item</span>
+    <span class="kw">SELECT</span> fk_items, <span class="fu">COUNT</span> (*) <span class="kw">AS</span> entry_cnt
+    <span class="kw">FROM</span> wos_b_2018.items it
+    <span class="kw">LEFT</span> <span class="kw">JOIN</span> wos_b_2018.ITEMS_AUTHORS_INSTITUTIONS iai <span class="kw">ON</span> it.pk_items = iai.fk_items
+    <span class="kw">LEFT</span> <span class="kw">JOIN</span> wos_b_2018.institutions inst <span class="kw">ON</span> inst.pk_institutions = iai.fk_institutions
+    <span class="kw">WHERE</span> pubtype = <span class="st">'Journal'</span>
+        <span class="kw">AND</span> doctype <span class="kw">IN</span> (<span class="st">'Article'</span>, <span class="st">'Review'</span>)
+        <span class="kw">AND</span> pubyear <span class="kw">BETWEEN</span> <span class="dv">2007</span> <span class="kw">AND</span> <span class="dv">2017</span>
+        <span class="kw">AND</span> fk_institutions <span class="kw">IS</span> <span class="kw">NOT</span> <span class="kw">NULL</span>
+        <span class="kw">AND</span> fk_authors <span class="kw">IS</span> <span class="kw">NOT</span> <span class="kw">NULL</span>
+        <span class="kw">AND</span> <span class="kw">role</span> = <span class="st">'author'</span>
+        <span class="kw">AND</span> <span class="kw">type</span> <span class="kw">IS</span> <span class="kw">NOT</span> <span class="kw">NULL</span>
+    <span class="kw">GROUP</span> <span class="kw">BY</span> fk_items
+) tmp2 <span class="kw">ON</span> tmp.fk_items = tmp2.fk_items
+<span class="kw">AND</span> tmp.entry_cnt = tmp2.entry_cnt); <span class="co">-- compare both numbers</span>
+
+<span class="co">/*</span>
+<span class="co">include items with COMPLETE iai information via fractional counting on author level and chained propagation via organization1 to pk_kb_inst:</span>
+<span class="co">*/</span>
+<span class="kw">INSERT</span> <span class="kw">INTO</span> wosb2018_frc_kbinstlvl
+<span class="kw">SELECT</span> <span class="kw">DISTINCT</span> fk_items, fk_kb_inst, <span class="fu">SUM</span>(orga_share) <span class="kw">OVER</span> (<span class="kw">PARTITION</span> <span class="kw">BY</span> fk_items, fk_kb_inst) <span class="kw">AS</span> frac_share, <span class="dv">1</span>
+<span class="kw">FROM</span>(
+<span class="kw">SELECT</span> <span class="kw">DISTINCT</span> tmp.fk_items, fk_authors, fk_kb_inst, ORGANIZATION1, orga_share
+<span class="kw">FROM</span>( <span class="co">-- computing fractional contribution of organsation on author level, double counting on fk_instituions level</span>
+  <span class="kw">SELECT</span> <span class="kw">DISTINCT</span> fk_items, fk_institutions, ORGANIZATION1, countrycode, fk_authors,
+    (<span class="dv">1</span>/(<span class="fu">COUNT</span> (<span class="kw">DISTINCT</span> fk_authors) <span class="kw">OVER</span> (<span class="kw">PARTITION</span> <span class="kw">BY</span> fk_items)))
+    /(<span class="fu">COUNT</span> (<span class="kw">DISTINCT</span> organization1) <span class="kw">OVER</span> (<span class="kw">PARTITION</span> <span class="kw">BY</span> fk_items, fk_authors)) <span class="kw">AS</span> orga_share
+  <span class="kw">FROM</span> wos_b_2018.items it
+  <span class="kw">JOIN</span> wos_b_2018.ITEMS_AUTHORS_INSTITUTIONS iai <span class="kw">ON</span> it.pk_items = iai.fk_items
+  <span class="kw">JOIN</span> wos_b_2018.institutions inst <span class="kw">ON</span> inst.pk_institutions = iai.fk_institutions
+  <span class="kw">WHERE</span> doctype <span class="kw">IN</span> (<span class="st">'Article'</span>, <span class="st">'Review'</span>)
+    <span class="kw">AND</span> pubtype = <span class="st">'Journal'</span>
+    <span class="kw">AND</span> pubyear <span class="kw">BETWEEN</span> <span class="dv">2007</span> <span class="kw">AND</span> <span class="dv">2017</span>
+    <span class="kw">AND</span> <span class="kw">role</span> = <span class="st">'author'</span>
+    <span class="kw">AND</span> <span class="kw">type</span> = <span class="st">'RS'</span>
+    <span class="kw">AND</span> pk_items <span class="kw">IN</span> (<span class="kw">SELECT</span> fk_items <span class="kw">FROM</span> items_iai_complete)
+    <span class="kw">AND</span> organization1 <span class="kw">IS</span> <span class="kw">NOT</span> <span class="kw">NULL</span>
+  ) tmp
+  <span class="kw">JOIN</span> wos_b_2018.kb_a_wos_addr_inst adin <span class="kw">ON</span> adin.fk_institutions = tmp.fk_institutions
+);
+
+<span class="co">/*</span>
+<span class="co">include items with INCOMPLETE iai information via fractional counting on organization level:</span>
+<span class="co">*/</span>
+<span class="kw">INSERT</span> <span class="kw">INTO</span> wosb2018_frc_kbinstlvl
+<span class="kw">SELECT</span> <span class="kw">DISTINCT</span> tmp.fk_items, fk_kb_inst, orga_share <span class="kw">AS</span> frac_share, <span class="dv">0</span>
+<span class="kw">FROM</span>(
+    <span class="kw">SELECT</span> <span class="kw">DISTINCT</span> fk_items, fk_institutions, organization1,
+    (<span class="dv">1</span>/(<span class="fu">COUNT</span> (<span class="kw">DISTINCT</span> organization1) <span class="kw">OVER</span> (<span class="kw">PARTITION</span> <span class="kw">BY</span> fk_items))) <span class="kw">AS</span> orga_share
+    <span class="kw">FROM</span> wos_b_2018.items it
+    <span class="kw">JOIN</span> wos_b_2018.items_authors_institutions iai <span class="kw">ON</span> iai.fk_items = it.pk_items
+    <span class="kw">JOIN</span> wos_b_2018.institutions inst <span class="kw">ON</span> inst.pk_institutions = iai.fk_institutions
+    <span class="kw">WHERE</span> doctype <span class="kw">IN</span> (<span class="st">'Article'</span>, <span class="st">'Review'</span>)
+        <span class="kw">AND</span> pubtype = <span class="st">'Journal'</span>
+        <span class="kw">AND</span> (<span class="kw">role</span> = <span class="st">'author'</span> <span class="kw">OR</span> <span class="kw">role</span> <span class="kw">IS</span> <span class="kw">NULL</span>)
+        <span class="kw">AND</span> <span class="kw">type</span> = <span class="st">'RS'</span>
+        <span class="kw">AND</span> pk_items <span class="kw">NOT</span> <span class="kw">IN</span> (<span class="kw">SELECT</span> fk_items <span class="kw">FROM</span> items_iai_complete)
+        <span class="kw">AND</span> organization1 <span class="kw">IS</span> <span class="kw">NOT</span> <span class="kw">NULL</span>
+    ) tmp
+<span class="kw">JOIN</span> wos_b_2018.kb_a_wos_addr_inst adin <span class="kw">ON</span> adin.fk_institutions = tmp.fk_institutions;
+
+<span class="kw">CREATE</span> <span class="kw">INDEX</span> wosb2018_frc_kbinstlvl_ix <span class="kw">ON</span> wosb2018_frc_kbinstlvl (fk_items, countrycode);
+
+<span class="kw">COMMIT</span>;</code></pre></div>
 <h2 id="conference-proceedings-web-of-science">Conference Proceedings Web of Science</h2>
 <p>Percentages of pk_items with partially missing information:</p>
 <table>
@@ -1104,7 +1200,7 @@ body {
 
 <span class="kw">COMMIT</span>;
 
-<span class="kw">DROP</span> <span class="kw">INDEX</span> wosb2018_frc_cntrylvl_ix
+<span class="kw">DROP</span> <span class="kw">INDEX</span> wosb2018_frc_cntrylvl_ix;
 <span class="kw">CREATE</span> <span class="kw">INDEX</span> wosb2018_frc_cntrylvl_ix <span class="kw">ON</span> wosb2018_frc_cntrylvl (fk_items, countrycode);
 
 <span class="kw">COMMIT</span>;</code></pre></div>

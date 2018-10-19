@@ -1,7 +1,7 @@
 Fraktionierung auf Autorenebene
 ================
 Stephan Stahlschmidt and Marion Schmidt
-18 Oktober, 2018
+19 Oktober, 2018
 
 -   [Motivation](#motivation)
 -   [Potential Solution](#potential-solution)
@@ -14,6 +14,7 @@ Stephan Stahlschmidt and Marion Schmidt
     -   [Comparison](#comparison-1)
 -   [Summing up](#summing-up)
 -   [Appendix](#appendix)
+    -   [KB institution encoding](#kb-institution-encoding)
     -   [Conference Proceedings Web of Science](#conference-proceedings-web-of-science)
 -   [Literatur](#literatur)
 
@@ -424,6 +425,8 @@ Prozentualer Anteil von pk\_items mit fehlenden Informationen (Scopus):
 Implementation in Scopus
 ------------------------
 
+**Change to SCP affiliation encoding, as organization1 in scopus is of poor quality?**
+
 ``` sql
 DROP TABLE items_iai_complete_scp;
 DROP TABLE scopusb2017_frc_cntrylvl;
@@ -618,6 +621,107 @@ Consequently fractionizing on the author level seems only reasonable on complete
 Appendix
 ========
 
+KB institution encoding
+-----------------------
+
+Fractionation weights are computed at the organiazation1 level (either with prior fractionation at the author level or due to incomplete information only on the organization1 level) and then transferred to the corresponding pk\_kb\_inst via the fk\_institutions link. Consequently we assume that every pk\_kb\_inst constitutes a superset of organization1.
+
+### wos\_b\_2018
+
+``` sql
+/*
+create empty table defining fractional weight for every paper by country
+causes implicit commit
+*/
+CREATE TABLE wosb2018_frc_kbinstlvl (
+    fk_items NUMBER,
+    fk_kb_inst NUMBER,
+    frac_share NUMBER(3,2),
+    ind_complete NUMBER(1,0)
+);
+
+/*
+populate temporary table
+*/
+INSERT INTO items_iai_complete (
+SELECT DISTINCT tmp.fk_items -- subset of items with complete iai information
+FROM( -- counts numbers of entries in iai for every item
+    SELECT fk_items, COUNT (*) AS entry_cnt
+    FROM wos_b_2018.items it
+    LEFT JOIN wos_b_2018.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
+    LEFT JOIN wos_b_2018.institutions inst ON inst.pk_institutions = iai.fk_institutions
+    WHERE (role IS NULL OR role = 'author') -- we only care for authors and missing information, other roles are neglected
+        AND pubtype = 'Journal'
+        AND doctype IN ('Article', 'Review')
+        AND pubyear BETWEEN 2007 AND 2017
+    GROUP BY fk_items
+) tmp
+JOIN( -- counts numbers of COMPLETE entries in iai for every item
+    SELECT fk_items, COUNT (*) AS entry_cnt
+    FROM wos_b_2018.items it
+    LEFT JOIN wos_b_2018.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
+    LEFT JOIN wos_b_2018.institutions inst ON inst.pk_institutions = iai.fk_institutions
+    WHERE pubtype = 'Journal'
+        AND doctype IN ('Article', 'Review')
+        AND pubyear BETWEEN 2007 AND 2017
+        AND fk_institutions IS NOT NULL
+        AND fk_authors IS NOT NULL
+        AND role = 'author'
+        AND type IS NOT NULL
+    GROUP BY fk_items
+) tmp2 ON tmp.fk_items = tmp2.fk_items
+AND tmp.entry_cnt = tmp2.entry_cnt); -- compare both numbers
+
+/*
+include items with COMPLETE iai information via fractional counting on author level and chained propagation via organization1 to pk_kb_inst:
+*/
+INSERT INTO wosb2018_frc_kbinstlvl
+SELECT DISTINCT fk_items, fk_kb_inst, SUM(orga_share) OVER (PARTITION BY fk_items, fk_kb_inst) AS frac_share, 1
+FROM(
+SELECT DISTINCT tmp.fk_items, fk_authors, fk_kb_inst, ORGANIZATION1, orga_share
+FROM( -- computing fractional contribution of organsation on author level, double counting on fk_instituions level
+  SELECT DISTINCT fk_items, fk_institutions, ORGANIZATION1, countrycode, fk_authors,
+    (1/(COUNT (DISTINCT fk_authors) OVER (PARTITION BY fk_items)))
+    /(COUNT (DISTINCT organization1) OVER (PARTITION BY fk_items, fk_authors)) AS orga_share
+  FROM wos_b_2018.items it
+  JOIN wos_b_2018.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
+  JOIN wos_b_2018.institutions inst ON inst.pk_institutions = iai.fk_institutions
+  WHERE doctype IN ('Article', 'Review')
+    AND pubtype = 'Journal'
+    AND pubyear BETWEEN 2007 AND 2017
+    AND role = 'author'
+    AND type = 'RS'
+    AND pk_items IN (SELECT fk_items FROM items_iai_complete)
+    AND organization1 IS NOT NULL
+  ) tmp
+  JOIN wos_b_2018.kb_a_wos_addr_inst adin ON adin.fk_institutions = tmp.fk_institutions
+);
+
+/*
+include items with INCOMPLETE iai information via fractional counting on organization level:
+*/
+INSERT INTO wosb2018_frc_kbinstlvl
+SELECT DISTINCT tmp.fk_items, fk_kb_inst, orga_share AS frac_share, 0
+FROM(
+    SELECT DISTINCT fk_items, fk_institutions, organization1,
+    (1/(COUNT (DISTINCT organization1) OVER (PARTITION BY fk_items))) AS orga_share
+    FROM wos_b_2018.items it
+    JOIN wos_b_2018.items_authors_institutions iai ON iai.fk_items = it.pk_items
+    JOIN wos_b_2018.institutions inst ON inst.pk_institutions = iai.fk_institutions
+    WHERE doctype IN ('Article', 'Review')
+        AND pubtype = 'Journal'
+        AND (role = 'author' OR role IS NULL)
+        AND type = 'RS'
+        AND pk_items NOT IN (SELECT fk_items FROM items_iai_complete)
+        AND organization1 IS NOT NULL
+    ) tmp
+JOIN wos_b_2018.kb_a_wos_addr_inst adin ON adin.fk_institutions = tmp.fk_institutions;
+
+CREATE INDEX wosb2018_frc_kbinstlvl_ix ON wosb2018_frc_kbinstlvl (fk_items, countrycode);
+
+COMMIT;
+```
+
 Conference Proceedings Web of Science
 -------------------------------------
 
@@ -724,7 +828,7 @@ GROUP BY fk_items, countrycode, 0;
 
 COMMIT;
 
-DROP INDEX wosb2018_frc_cntrylvl_ix
+DROP INDEX wosb2018_frc_cntrylvl_ix;
 CREATE INDEX wosb2018_frc_cntrylvl_ix ON wosb2018_frc_cntrylvl (fk_items, countrycode);
 
 COMMIT;
