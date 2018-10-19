@@ -1,4 +1,4 @@
-Fraktionierung auf Autorenebene
+Fractionation on the level of authors
 ================
 Stephan Stahlschmidt and Marion Schmidt
 19 Oktober, 2018
@@ -8,13 +8,15 @@ Stephan Stahlschmidt and Marion Schmidt
 -   [Data Quality](#data-quality)
 -   [Implementation](#implementation)
 -   [Caveats](#caveats)
--   [Comparison](#comparison)
+-   [Comparison with ISI fractionation on organization1](#comparison-with-isi-fractionation-on-organization1)
 -   [Scopus: scopus\_b\_2017](#scopus-scopus_b_2017)
     -   [Implementation in Scopus](#implementation-in-scopus)
-    -   [Comparison](#comparison-1)
+-   [Comparison with ISI fractionation on organization1](#comparison-with-isi-fractionation-on-organization1-1)
 -   [Summing up](#summing-up)
 -   [Appendix](#appendix)
     -   [KB institution encoding](#kb-institution-encoding)
+        -   [Implementation for wos\_b\_2018](#implementation-for-wos_b_2018)
+        -   [Implementation for scopus\_b\_2017](#implementation-for-scopus_b_2017)
     -   [Conference Proceedings Web of Science](#conference-proceedings-web-of-science)
 -   [Literatur](#literatur)
 
@@ -279,8 +281,8 @@ Caveats
 -   anonymous authors (*role = 'anon'*) are omitted
 -   Any other?
 
-Comparison
-==========
+Comparison with ISI fractionation on organization1
+==================================================
 
 As an alternative implementation we also compute weights based on fractionation on the *organization1* level:
 
@@ -357,9 +359,9 @@ Only Italy and Korea swap places in this ranking of productivity.
 Scopus: scopus\_b\_2017
 =======================
 
-Die DatenqualitÃ¤t von Scopus erscheint signifikant besser zu sein, und zwar fÃ¼r den aktuellen Rand als auch insbesondere fÃ¼r vergangene Jahre.
+Data quality seems to be better in Scopus. However, the field *organization1* is not as much structured in Scopus as in WoS, consequently as an alternative one could consider to use the Scopus institution harmonization *AFID* in the Rohdatenbank instead of *organization1*. However an uniformly detailed affiliation assignment in *organization1* might not have substantial effects on country statistics, while the *pk\_kb\_inst* should jointly for all German institution include several of these detailied sub-organization affiliations and consequently validate a relative comparison among German institutions.
 
-Prozentualer Anteil von pk\_items mit fehlenden Informationen (Scopus):
+Percentages of pk\_items with partially missing information (Scopus):
 
 |      |  no author nor affiliation|  no author type|  author w/o affiliation|  affiliation w/o authors|  no organization1|  total|
 |------|--------------------------:|---------------:|-----------------------:|------------------------:|-----------------:|------:|
@@ -424,8 +426,6 @@ Prozentualer Anteil von pk\_items mit fehlenden Informationen (Scopus):
 <!-- ``` -->
 Implementation in Scopus
 ------------------------
-
-**Change to SCP affiliation encoding, as organization1 in scopus is of poor quality?**
 
 ``` sql
 DROP TABLE items_iai_complete_scp;
@@ -533,8 +533,8 @@ CREATE INDEX scpb2018_frc_cntrylvl_ix ON scopusb2017_frc_cntrylvl (fk_items, cou
 COMMIT;
 ```
 
-Comparison
-----------
+Comparison with ISI fractionation on organization1
+==================================================
 
 As an alternative implementation we also compute weights based on fractionation on the *organization1* level:
 
@@ -626,7 +626,7 @@ KB institution encoding
 
 Fractionation weights are computed at the organiazation1 level (either with prior fractionation at the author level or due to incomplete information only on the organization1 level) and then transferred to the corresponding pk\_kb\_inst via the fk\_institutions link. Consequently we assume that every pk\_kb\_inst constitutes a superset of organization1.
 
-### wos\_b\_2018
+### Implementation for wos\_b\_2018
 
 ``` sql
 /*
@@ -717,7 +717,99 @@ FROM(
     ) tmp
 JOIN wos_b_2018.kb_a_wos_addr_inst adin ON adin.fk_institutions = tmp.fk_institutions;
 
-CREATE INDEX wosb2018_frc_kbinstlvl_ix ON wosb2018_frc_kbinstlvl (fk_items, countrycode);
+CREATE INDEX wosb2018_frc_kbinstlvl_ix ON wosb2018_frc_kbinstlvl (fk_items, fk_kb_inst);
+
+COMMIT;
+```
+
+### Implementation for scopus\_b\_2017
+
+``` sql
+/*
+create empty table defining fractional weight for every paper by country
+causes implicit commit
+*/
+CREATE TABLE scpb2017_frc_kbinstlvl (
+    fk_items NUMBER,
+    fk_kb_inst NUMBER,
+    frac_share NUMBER(3,2),
+    ind_complete NUMBER(1,0)
+);
+
+/*
+populate temporary table
+*/
+INSERT INTO items_iai_complete (
+SELECT DISTINCT tmp.fk_items -- subset of items with complete iai information
+FROM( -- counts numbers of entries in iai for every item
+    SELECT fk_items, COUNT (*) AS entry_cnt
+    FROM scopus_b_2017.items it
+    LEFT JOIN scopus_b_2017.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
+    LEFT JOIN scopus_b_2017.institutions inst ON inst.pk_institutions = iai.fk_institutions
+    WHERE pubtype = 'J'
+        AND doctype IN ('ar', 're')
+        AND pubyear BETWEEN 2007 AND 2017
+    GROUP BY fk_items
+) tmp
+JOIN( -- counts numbers of COMPLETE entries in iai for every item
+    SELECT fk_items, COUNT (*) AS entry_cnt
+    FROM scopus_b_2017.items it
+    LEFT JOIN scopus_b_2017.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
+    LEFT JOIN scopus_b_2017.institutions inst ON inst.pk_institutions = iai.fk_institutions
+    WHERE pubtype = 'J'
+        AND doctype IN ('ar', 're')
+        AND pubyear BETWEEN 2007 AND 2017
+        AND fk_institutions IS NOT NULL
+        AND fk_authors IS NOT NULL
+        AND type IS NOT NULL
+    GROUP BY fk_items
+) tmp2 ON tmp.fk_items = tmp2.fk_items
+AND tmp.entry_cnt = tmp2.entry_cnt); -- compare both numbers
+
+/*
+include items with COMPLETE iai information via fractional counting on author level and chained propagation via organization1 to pk_kb_inst:
+*/
+INSERT INTO scpb2017_frc_kbinstlvl
+SELECT DISTINCT fk_items, fk_kb_inst, SUM(orga_share) OVER (PARTITION BY fk_items, fk_kb_inst) AS frac_share, 1
+FROM(
+SELECT DISTINCT tmp.fk_items, fk_authors, fk_kb_inst, ORGANIZATION1, orga_share
+FROM( -- computing fractional contribution of organsation on author level, double counting on fk_instituions level
+  SELECT DISTINCT fk_items, fk_institutions, ORGANIZATION1, countrycode, fk_authors,
+    (1/(COUNT (DISTINCT fk_authors) OVER (PARTITION BY fk_items)))
+    /(COUNT (DISTINCT organization1) OVER (PARTITION BY fk_items, fk_authors)) AS orga_share
+  FROM scopus_b_2017.items it
+  JOIN scopus_b_2017.ITEMS_AUTHORS_INSTITUTIONS iai ON it.pk_items = iai.fk_items
+  JOIN scopus_b_2017.institutions inst ON inst.pk_institutions = iai.fk_institutions
+  WHERE doctype IN ('ar', 're')
+    AND pubtype = 'J'
+    AND pubyear BETWEEN 2007 AND 2017
+    AND type = 'RS'
+    AND pk_items IN (SELECT fk_items FROM items_iai_complete)
+    AND organization1 IS NOT NULL
+  ) tmp
+  JOIN scopus_b_2017.kb_a_scp_addr_inst adin ON adin.fk_institutions = tmp.fk_institutions
+);
+
+/*
+include items with INCOMPLETE iai information via fractional counting on organization level:
+*/
+INSERT INTO scpb2017_frc_kbinstlvl
+SELECT DISTINCT tmp.fk_items, fk_kb_inst, orga_share AS frac_share, 0
+FROM(
+    SELECT DISTINCT fk_items, fk_institutions, organization1,
+    (1/(COUNT (DISTINCT organization1) OVER (PARTITION BY fk_items))) AS orga_share
+    FROM scopus_b_2017.items it
+    JOIN scopus_b_2017.items_authors_institutions iai ON iai.fk_items = it.pk_items
+    JOIN scopus_b_2017.institutions inst ON inst.pk_institutions = iai.fk_institutions
+    WHERE doctype IN ('ar', 're')
+        AND pubtype = 'J'
+        AND type = 'RS'
+        AND pk_items NOT IN (SELECT fk_items FROM items_iai_complete)
+        AND organization1 IS NOT NULL
+    ) tmp
+JOIN scopus_b_2017.kb_a_scp_addr_inst adin ON adin.fk_institutions = tmp.fk_institutions;
+
+CREATE INDEX scpb2017_frc_kbinstlvl_ix ON scpb2017_frc_kbinstlvl (fk_items, fk_kb_inst);
 
 COMMIT;
 ```
