@@ -1,7 +1,7 @@
 Fractionation on the level of authors
 ================
 Stephan Stahlschmidt and Marion Schmidt
-19 Oktober, 2018
+22 Oktober, 2018
 
 -   [Motivation](#motivation)
 -   [Potential Solution](#potential-solution)
@@ -11,7 +11,7 @@ Stephan Stahlschmidt and Marion Schmidt
 -   [Comparison with ISI fractionation on organization1](#comparison-with-isi-fractionation-on-organization1)
 -   [Scopus: scopus\_b\_2017](#scopus-scopus_b_2017)
     -   [Implementation in Scopus](#implementation-in-scopus)
--   [Comparison with ISI fractionation on organization1](#comparison-with-isi-fractionation-on-organization1-1)
+    -   [Comparison with ISI fractionation on organization1](#comparison-with-isi-fractionation-on-organization1-1)
 -   [Summing up](#summing-up)
 -   [Appendix](#appendix)
     -   [KB institution encoding](#kb-institution-encoding)
@@ -534,7 +534,7 @@ COMMIT;
 ```
 
 Comparison with ISI fractionation on organization1
-==================================================
+--------------------------------------------------
 
 As an alternative implementation we also compute weights based on fractionation on the *organization1* level:
 
@@ -710,6 +710,7 @@ FROM(
     JOIN wos_b_2018.institutions inst ON inst.pk_institutions = iai.fk_institutions
     WHERE doctype IN ('Article', 'Review')
         AND pubtype = 'Journal'
+        AND pubyear BETWEEN 2007 AND 2017
         AND (role = 'author' OR role IS NULL)
         AND type = 'RS'
         AND pk_items NOT IN (SELECT fk_items FROM items_iai_complete)
@@ -803,6 +804,7 @@ FROM(
     JOIN scopus_b_2017.institutions inst ON inst.pk_institutions = iai.fk_institutions
     WHERE doctype IN ('ar', 're')
         AND pubtype = 'J'
+        AND pubyear BETWEEN 2007 AND 2017
         AND type = 'RS'
         AND pk_items NOT IN (SELECT fk_items FROM items_iai_complete)
         AND organization1 IS NOT NULL

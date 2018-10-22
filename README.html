@@ -27,7 +27,7 @@ body {
 
 <h1 id="fractionation-on-the-level-of-authors">Fractionation on the level of authors</h1>
 <p>Stephan Stahlschmidt and Marion Schmidt<br />
-19 Oktober, 2018</p>
+22 Oktober, 2018</p>
 <ul>
 <li><a href="#motivation">Motivation</a></li>
 <li><a href="#potential-solution">Potential Solution</a></li>
@@ -38,8 +38,8 @@ body {
 <li><a href="#scopus-scopus_b_2017">Scopus: scopus_b_2017</a>
 <ul>
 <li><a href="#implementation-in-scopus">Implementation in Scopus</a></li>
-</ul></li>
 <li><a href="#comparison-with-isi-fractionation-on-organization1-1">Comparison with ISI fractionation on organization1</a></li>
+</ul></li>
 <li><a href="#summing-up">Summing up</a></li>
 <li><a href="#appendix">Appendix</a>
 <ul>
@@ -826,7 +826,7 @@ body {
 <span class="kw">CREATE</span> <span class="kw">INDEX</span> scpb2018_frc_cntrylvl_ix <span class="kw">ON</span> scopusb2017_frc_cntrylvl (fk_items, countrycode);
 
 <span class="kw">COMMIT</span>;</code></pre></div>
-<h1 id="comparison-with-isi-fractionation-on-organization1-1">Comparison with ISI fractionation on organization1</h1>
+<h2 id="comparison-with-isi-fractionation-on-organization1-1">Comparison with ISI fractionation on organization1</h2>
 <p>As an alternative implementation we also compute weights based on fractionation on the <em>organization1</em> level:</p>
 <div class="sourceCode"><pre class="sourceCode sql"><code class="sourceCode sql">
 <span class="co">/*</span>
@@ -981,6 +981,7 @@ body {
     <span class="kw">JOIN</span> wos_b_2018.institutions inst <span class="kw">ON</span> inst.pk_institutions = iai.fk_institutions
     <span class="kw">WHERE</span> doctype <span class="kw">IN</span> (<span class="st">'Article'</span>, <span class="st">'Review'</span>)
         <span class="kw">AND</span> pubtype = <span class="st">'Journal'</span>
+        <span class="kw">AND</span> pubyear <span class="kw">BETWEEN</span> <span class="dv">2007</span> <span class="kw">AND</span> <span class="dv">2017</span>
         <span class="kw">AND</span> (<span class="kw">role</span> = <span class="st">'author'</span> <span class="kw">OR</span> <span class="kw">role</span> <span class="kw">IS</span> <span class="kw">NULL</span>)
         <span class="kw">AND</span> <span class="kw">type</span> = <span class="st">'RS'</span>
         <span class="kw">AND</span> pk_items <span class="kw">NOT</span> <span class="kw">IN</span> (<span class="kw">SELECT</span> fk_items <span class="kw">FROM</span> items_iai_complete)
@@ -1070,6 +1071,7 @@ body {
     <span class="kw">JOIN</span> scopus_b_2017.institutions inst <span class="kw">ON</span> inst.pk_institutions = iai.fk_institutions
     <span class="kw">WHERE</span> doctype <span class="kw">IN</span> (<span class="st">'ar'</span>, <span class="st">'re'</span>)
         <span class="kw">AND</span> pubtype = <span class="st">'J'</span>
+        <span class="kw">AND</span> pubyear <span class="kw">BETWEEN</span> <span class="dv">2007</span> <span class="kw">AND</span> <span class="dv">2017</span>
         <span class="kw">AND</span> <span class="kw">type</span> = <span class="st">'RS'</span>
         <span class="kw">AND</span> pk_items <span class="kw">NOT</span> <span class="kw">IN</span> (<span class="kw">SELECT</span> fk_items <span class="kw">FROM</span> items_iai_complete)
         <span class="kw">AND</span> organization1 <span class="kw">IS</span> <span class="kw">NOT</span> <span class="kw">NULL</span>
