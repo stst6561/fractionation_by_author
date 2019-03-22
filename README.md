@@ -1,9 +1,11 @@
 Fractionation on the level of authors
 ================
 Stephan Stahlschmidt and Marion Schmidt
-22 Oktober, 2018
+22 März, 2019
 
 -   [Motivation](#motivation)
+-   [TO DO](#to-do)
+-   [Author types in WoS and SCP](#author-types-in-wos-and-scp)
 -   [Potential Solution](#potential-solution)
 -   [Data Quality](#data-quality)
 -   [Implementation](#implementation)
@@ -52,6 +54,16 @@ WHERE ut_eid = '000262133500009'
 |     21176674|          11533142| RS   | author         | Sincrotrone Trieste SCpA | ITA         |
 |     24438445|                NA| RS   | researcher\_id | NA                       | NA          |
 
+TO DO
+=====
+
+-   EMPIRICAL STUDY ON ACTUAL USE OF RS AND RP AUTHOR TYPES IN WOS AND SCP
+
+Author types in WoS and SCP
+===========================
+
+The *KB* versions of *Web of Science* and *Scopus* differ in their usage of *fk\_authors*, *type* and *role*. WoS holds the same *fk\_authors* as a corresponding author (*RP*) and as an ordinary author (*RS*), while SCP assigns two different *fk\_authors* for the same author which vary in their type (*RP* or *RS*). In any case entries for corresponding authors have to excluded via the *RP* type. Furthermore in the WoS authors have to be separated from other roles via *role = 'author'*.
+
 Potential Solution
 ==================
 
@@ -83,8 +95,6 @@ GROUP BY fk_items, countrycode
 |   28825338| CZE         |        0.750|
 |   28825338| MEX         |        0.125|
 
-The *KB* versions of *Web of Science* and *Scopus* differ in their usage of *fk\_authors*, *type* and *role* (Why?). WoS holds the same *fk\_authors* as a corresponding author (*RP*) and as an ordinary author (*RS*), while SCP assigns two different *fk\_authors* for the same author which vary in their type (*RP* or *RS*). In any case entries for corresponding authors have to excluded via the *RP* type. Furthermore in the WoS authors have to be separated from other roles via *role = 'author'*.
-
 Data Quality
 ============
 
@@ -109,7 +119,7 @@ Percentages of pk\_items with partially missing information:
 ![](README_files/figure-markdown_github/tab_friction-1.png)
 
 <!-- ```{r tab_dif_author_counting, echo = FALSE, eval = FALSE} -->
-<!-- # Differenz zwischen author_cnt und ZÃ¤hlung der fk_authors -->
+<!-- # Differenz zwischen author_cnt und Zählung der fk_authors -->
 <!-- dif_author_counting <- dbGetQuery(sql_pool, strwrap(paste0(" -->
 <!--   SELECT pubyear, SUM(diff) -->
 <!--   FROM( -->
@@ -132,7 +142,7 @@ Percentages of pk\_items with partially missing information:
 <!--   width = 100000, simplify = TRUE) -->
 <!--   ) -->
 <!-- ``` -->
-<!-- Prozentualer Anteil von pk_items mit Unterschieden in author_cnt und ZÃ¤hlung der zugehÃ¶rigen fk_authors: -->
+<!-- Prozentualer Anteil von pk_items mit Unterschieden in author_cnt und Zählung der zugehörigen fk_authors: -->
 <!-- ```{r tab_diff, echo = FALSE, eval = FALSE} -->
 <!-- tmp <- as.matrix(dif_author_counting[,2]/papersByYear[,2] * 100) -->
 <!-- rownames(tmp) <- as.character(2007:2017) -->
@@ -379,7 +389,7 @@ Percentages of pk\_items with partially missing information (Scopus):
 ![](README_files/figure-markdown_github/tab_friction_sc-1.png)
 
 <!-- ```{r, tab_dif_author_counting_sc, echo=FALSE, eval=FALSE} -->
-<!-- # Differenz zwischen author_cnt und ZÃ¤hlung der fk_authors -->
+<!-- # Differenz zwischen author_cnt und Zählung der fk_authors -->
 <!-- dif_author_counting_sc <- dbGetQuery(sql_pool, strwrap(paste0(" -->
 <!--   SELECT pubyear, SUM(diff) -->
 <!--   FROM( -->
@@ -401,7 +411,7 @@ Percentages of pk\_items with partially missing information (Scopus):
 <!--   width = 100000, simplify = TRUE) -->
 <!--   ) -->
 <!-- ``` -->
-<!-- Prozentualer Anteil von pk_items mit Unterschieden in author_cnt und ZÃ¤hlung der zugehÃ¶rigen fk_authors (Scopus): -->
+<!-- Prozentualer Anteil von pk_items mit Unterschieden in author_cnt und Zählung der zugehörigen fk_authors (Scopus): -->
 <!-- ```{r, tab_diff_sc, echo=FALSE, eval=FALSE, cache=FALSE} -->
 <!-- tmp <- as.matrix(dif_author_counting_sc[,2]/papersByYear_sc[,2] * 100) -->
 <!-- rownames(tmp) <- as.character(2007:2016) -->

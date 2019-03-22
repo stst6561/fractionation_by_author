@@ -55,6 +55,14 @@ LEFT JOIN wos_b_2018.institutions inst ON inst.pk_institutions = iai.fk_institut
 WHERE ut_eid = '000262133500009'
 ```
 
+# TO DO
+
+* EMPIRICAL STUDY ON ACTUAL USE OF RS AND RP AUTHOR TYPES IN WOS AND SCP
+
+# Author types in WoS and SCP
+
+The *KB* versions of *Web of Science* and *Scopus* differ in their usage of *fk_authors*, *type* and *role*. WoS holds the same *fk_authors* as a corresponding author (*RP*) and as an ordinary author (*RS*), while SCP assigns two different *fk_authors* for the same author which vary in their type (*RP* or *RS*). In any case entries for corresponding authors have to excluded via the *RP* type. Furthermore in the WoS authors have to be separated from other roles via *role = 'author'*.
+
 # Potential Solution
 
 Fractional counting based on author attribution and subsequent aggregation to the levle of interest (here: countries) might be computed as follows:
@@ -78,8 +86,6 @@ FROM( -- aggregating on organization1 level
 )
 GROUP BY fk_items, countrycode
 ```
-
-The *KB* versions of *Web of Science* and *Scopus* differ in their usage of *fk_authors*, *type* and *role* (Why?). WoS holds the same *fk_authors* as a corresponding author (*RP*) and as an ordinary author (*RS*), while SCP assigns two different *fk_authors* for the same author which vary in their type (*RP* or *RS*). In any case entries for corresponding authors have to excluded via the *RP* type. Furthermore in the WoS authors have to be separated from other roles via *role = 'author'*.
 
 # Data Quality
 
